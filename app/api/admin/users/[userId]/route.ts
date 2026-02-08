@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requirePermission } from '@/app/lib/rbac/apiMiddleware';
+import { requirePermission, requireMinLevel } from '@/app/lib/rbac/apiMiddleware';
 import { createAdminClient } from '@/app/lib/supabase/admin';
 
 export async function GET(
@@ -61,6 +61,67 @@ export async function GET(
       created_at: authUser.user.created_at,
       is_banned: !!authUser.user.banned_until,
     });
+  } catch (error) {
+    console.error('API error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ userId: string }> }
+) {
+  const authResult = await requireMinLevel(request, 80);
+  if (authResult instanceof NextResponse) return authResult;
+
+  try {
+    const { userId } = await params;
+    const { user, supabase, hierarchyLevel } = authResult;
+
+    // Prevent self-deletion
+    if (userId === user.id) {
+      return NextResponse.json(
+        { error: 'Cannot delete your own account' },
+        { status: 403 }
+      );
+    }
+
+    // Check that target user's role is below the requester's level
+    const { data: targetRole } = await supabase
+      .from('user_roles')
+      .select('roles(hierarchy_level)')
+      .eq('user_id', userId)
+      .single();
+
+    const targetLevel =
+      (targetRole?.roles as unknown as { hierarchy_level: number } | null)
+        ?.hierarchy_level ?? 0;
+
+    if (targetLevel >= hierarchyLevel) {
+      return NextResponse.json(
+        { error: 'Cannot delete a user at or above your own level' },
+        { status: 403 }
+      );
+    }
+
+    const adminClient = createAdminClient();
+
+    // Clean up: user_permissions and user_roles will cascade from auth.users FK,
+    // but delete explicitly for audit clarity
+    await supabase.from('user_permissions').delete().eq('user_id', userId);
+    await supabase.from('user_roles').delete().eq('user_id', userId);
+
+    // Delete the auth user (this is permanent)
+    const { error } = await adminClient.auth.admin.deleteUser(userId);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    return NextResponse.json({ success: true });
   } catch (error) {
     console.error('API error:', error);
     return NextResponse.json(

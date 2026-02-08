@@ -28,18 +28,13 @@ export default function SignUpPage() {
 
     setIsLoading(true);
 
-    try {
-      const result = await signUp(email, password);
-      if (result?.error) {
-        setError(result.error);
-      } else if (result?.success) {
-        setSuccess(true);
-      }
-    } catch {
-      setError('An unexpected error occurred');
-    } finally {
-      setIsLoading(false);
+    const result = await signUp(email, password);
+    if (result?.error) {
+      setError(result.error);
+    } else if (result?.success) {
+      setSuccess(true);
     }
+    setIsLoading(false);
   };
 
   if (success) {

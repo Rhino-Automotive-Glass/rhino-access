@@ -15,14 +15,9 @@ export default function LoginPage() {
     setError('');
     setIsLoading(true);
 
-    try {
-      const result = await signIn(email, password);
-      if (result?.error) {
-        setError(result.error);
-      }
-    } catch {
-      setError('An unexpected error occurred');
-    } finally {
+    const result = await signIn(email, password);
+    if (result?.error) {
+      setError(result.error);
       setIsLoading(false);
     }
   };

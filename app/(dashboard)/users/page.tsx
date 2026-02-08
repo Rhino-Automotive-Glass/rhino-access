@@ -37,6 +37,8 @@ export default function UsersPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRoleId, setInviteRoleId] = useState('');
   const [inviting, setInviting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !hasPermission('access', 'manage_users')) {
@@ -93,6 +95,25 @@ export default function UsersPage() {
       toast('error', typeof err.error === 'string' ? err.error : 'Failed to invite user');
     }
     setInviting(false);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+
+    const res = await fetch(`/api/admin/users/${deleteTarget.id}`, {
+      method: 'DELETE',
+    });
+
+    if (res.ok) {
+      toast('success', `${deleteTarget.email} has been removed`);
+      setDeleteTarget(null);
+      await loadData();
+    } else {
+      const err = await res.json();
+      toast('error', typeof err.error === 'string' ? err.error : 'Failed to remove user');
+    }
+    setDeleting(false);
   };
 
   const filtered = users.filter(
@@ -190,13 +211,21 @@ export default function UsersPage() {
                         <td className="px-6 py-4 text-sm text-gray-500">
                           {new Date(u.assigned_at).toLocaleDateString()}
                         </td>
-                        <td className="px-6 py-4 text-right">
+                        <td className="px-6 py-4 text-right space-x-2">
                           <button
                             onClick={() => router.push(`/users/${u.id}`)}
                             className="btn btn-ghost btn-sm text-blue-600"
                           >
                             Edit
                           </button>
+                          {u.hierarchy_level < (myRole?.hierarchy_level ?? 0) && (
+                            <button
+                              onClick={() => setDeleteTarget(u)}
+                              className="btn btn-ghost btn-sm text-red-600"
+                            >
+                              Remove
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))
@@ -249,6 +278,36 @@ export default function UsersPage() {
               className="btn btn-primary btn-md"
             >
               {inviting ? 'Sending...' : 'Send Invite'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Remove User"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Are you sure you want to permanently remove{' '}
+            <span className="font-semibold text-slate-900">{deleteTarget?.email}</span>?
+            This will delete their account, role, and all permission overrides. This action cannot be undone.
+          </p>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              onClick={() => setDeleteTarget(null)}
+              className="btn btn-secondary btn-md"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="btn btn-md bg-red-600 text-white hover:bg-red-700"
+            >
+              {deleting ? 'Removing...' : 'Remove User'}
             </button>
           </div>
         </div>

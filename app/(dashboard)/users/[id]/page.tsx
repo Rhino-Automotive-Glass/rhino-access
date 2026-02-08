@@ -4,6 +4,7 @@ import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRole } from '@/app/contexts/RoleContext';
 import RoleBadge from '@/app/components/ui/RoleBadge';
+import Modal from '@/app/components/ui/Modal';
 import { toast } from '@/app/components/ui/Toast';
 import { APP_CONFIG } from '@/app/lib/rbac/permissions';
 
@@ -51,6 +52,8 @@ export default function UserDetailPage({
   const [userOverrides, setUserOverrides] = useState<Map<string, boolean>>(new Map());
   const [saving, setSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !hasPermission('access', 'manage_users')) {
@@ -170,6 +173,23 @@ export default function UserDetailPage({
     setSaving(false);
   };
 
+  const handleDelete = async () => {
+    setDeleting(true);
+    const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+    if (res.ok) {
+      toast('success', `${userDetail?.email} has been removed`);
+      router.push('/users');
+    } else {
+      const err = await res.json();
+      toast('error', typeof err.error === 'string' ? err.error : 'Failed to remove user');
+      setDeleting(false);
+    }
+  };
+
+  const canDelete =
+    userDetail &&
+    (userDetail.role?.hierarchy_level ?? 0) < (myRole?.hierarchy_level ?? 0);
+
   const permsByApp = allPermissions.reduce(
     (acc, p) => {
       (acc[p.app] ??= []).push(p);
@@ -210,17 +230,27 @@ export default function UserDetailPage({
           &larr; Back to Users
         </button>
 
-        <div className="flex items-center gap-4 mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">{userDetail.email}</h1>
-            <p className="text-sm text-slate-500">
-              Joined {new Date(userDetail.created_at).toLocaleDateString()}
-            </p>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900">{userDetail.email}</h1>
+              <p className="text-sm text-slate-500">
+                Joined {new Date(userDetail.created_at).toLocaleDateString()}
+              </p>
+            </div>
+            {userDetail.is_banned && (
+              <span className="px-3 py-1 text-xs font-medium rounded-full bg-red-100 text-red-700">
+                Deactivated
+              </span>
+            )}
           </div>
-          {userDetail.is_banned && (
-            <span className="px-3 py-1 text-xs font-medium rounded-full bg-red-100 text-red-700">
-              Deactivated
-            </span>
+          {canDelete && (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="btn btn-sm bg-red-600 text-white hover:bg-red-700"
+            >
+              Remove User
+            </button>
           )}
         </div>
 
@@ -321,6 +351,36 @@ export default function UserDetailPage({
           })}
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title="Remove User"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Are you sure you want to permanently remove{' '}
+            <span className="font-semibold text-slate-900">{userDetail.email}</span>?
+            This will delete their account, role, and all permission overrides. This action cannot be undone.
+          </p>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="btn btn-secondary btn-md"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="btn btn-md bg-red-600 text-white hover:bg-red-700"
+            >
+              {deleting ? 'Removing...' : 'Remove User'}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </main>
   );
 }

@@ -46,85 +46,212 @@ Three Supabase client variants used depending on context:
 - `actions.ts` — Server actions (`'use server'`) for `signIn`, `signUp`, `signOut`
 - `constants.ts` — Route paths and error message constants
 - OAuth callback at `app/api/auth/callback/route.ts`
+- `redirect()` throws `NEXT_REDIRECT` internally — do NOT wrap server action calls in try/catch or it will flash an error before the redirect completes
 
-### RBAC System (`app/lib/rbac/`)
+### Supabase TypeScript Gotcha
+When using `.select('roles(hierarchy_level)')` (joined/embedded selects), Supabase returns the joined field typed as an array. To cast to a single object, use `as unknown as { hierarchy_level: number } | null` — a direct `as` cast causes TS errors because the types don't overlap.
 
-**Roles** (database-driven, defined in `roles` table):
-`super_admin` (100) > `admin` (80) > `editor` (60) > `quality_assurance` (50) > `approver` (40) > `viewer` (10)
+---
 
-Hierarchy level determines who can assign whom — you can only assign roles below your own level.
+## RBAC System — How Roles & Permissions Work
 
-**Permissions** are fine-grained, per-app actions stored in the `permissions` table:
-- Format: `app:action:resource` (e.g. `origin:edit:origin_sheets`, `stock:adjust_inventory:inventory`)
-- Assigned to roles via `role_permissions` junction table
-- Per-user overrides (grant/deny) via `user_permissions` table
-- Deny overrides always win over grants
+### Overview
 
-**Key functions:**
-- `apiMiddleware.ts` — `requireAuth()`, `requirePermission(app, action, resource?)`, `requireMinLevel(level)`
-- `permissions.ts` — `hasPermission()` helper, `ROLE_COLORS`, `APP_CONFIG`
-- `types.ts` — `RoleName`, `AppName`, `Role`, `Permission`, `UserWithRole`
+The RBAC system has three layers:
+1. **Roles** — every user has exactly one role (stored in `user_roles`)
+2. **Role permissions** — each role has a default set of permissions (stored in `role_permissions`)
+3. **User overrides** — individual users can be granted or denied specific permissions beyond their role (stored in `user_permissions`)
 
-**Client-side:** `RoleContext` (`app/contexts/RoleContext.tsx`) fetches from `/api/me/permissions` and exposes:
-- `useRole()` hook → `{ user, role, permissions, isLoading, hasPermission(app, action, resource?), refreshRole() }`
+When resolving a user's effective permissions: `(role_permissions UNION user_grants) MINUS user_denies`. Deny always wins.
 
-### Database Tables
-- `auth.users` — Built-in Supabase auth
-- `roles` — Role definitions with hierarchy_level and is_system flag
-- `permissions` — Fine-grained permission definitions (app, action, resource)
-- `role_permissions` — Junction: which permissions each role gets by default
-- `user_permissions` — Per-user overrides (granted boolean for grant/deny)
-- `user_roles` — Maps user_id → role_id (one role per user)
-- `audit_logs` — Tracks changes (auto-populated by trigger on user_roles)
+### Roles & Hierarchy
 
-**Supabase RPC functions** (usable by child apps too):
-- `user_has_permission(p_app, p_action, p_resource)` — returns boolean
-- `get_user_permissions(p_user_id)` — returns all resolved permissions
-- `current_user_hierarchy_level()` — returns int (used in RLS policies)
+Roles are database-driven (not hardcoded). Defined in the `roles` table with a `hierarchy_level`:
 
-### Routing
-- `(dashboard)/layout.tsx` — Server component that checks auth, wraps with `RoleProvider`, `Header`, `ToastContainer`
-- Route groups organize URLs: `(dashboard)/`, `/login`, `/signup`
-- Middleware in `proxy.ts` refreshes Supabase sessions on all non-static routes
+| Role | Level | Description |
+|------|-------|-------------|
+| `super_admin` | 100 | Full system access. Can manage roles, permissions, and all users. |
+| `admin` | 80 | Can manage users and most settings. Cannot manage role/permission definitions. |
+| `editor` | 60 | Can create and edit content across all child apps. |
+| `quality_assurance` | 50 | Can review, approve/reject, and flag items. |
+| `approver` | 40 | Can approve submissions and changes. |
+| `viewer` | 10 | Read-only access to child apps. Default for new users. |
 
-### Pages
-- `/` — Dashboard (user info, permissions summary, quick actions)
-- `/users` — User list with search, invite modal
-- `/users/[id]` — User detail: role selector + permission matrix with override checkboxes
-- `/apps` — Per-app overview (permission counts, user counts)
-- `/audit` — Audit log viewer with filtering
-- `/admin` — Legacy redirect to `/users`
-- `/login`, `/signup` — Public auth pages
+**Hierarchy enforcement:**
+- You can only assign roles with a level **below** your own (admin at 80 cannot assign super_admin at 100)
+- You can only delete users with a level **below** your own
+- You cannot change your own role or delete yourself
+- RLS policies enforce this at the database level via `current_user_hierarchy_level()`
+- API routes also validate hierarchy before mutations
+
+### Permissions
+
+Permissions are fine-grained, per-app actions stored in the `permissions` table with three columns:
+- `app` — which app (`access`, `origin`, `code`, `stock`)
+- `action` — what operation (`view`, `create`, `edit`, `delete`, `approve`, `manage_users`, etc.)
+- `resource` — optional sub-resource (`origin_sheets`, `product_codes`, `inventory`)
+
+Current permissions seeded by the migration:
+
+**Rhino Access** (this app):
+`manage_users`, `manage_roles`, `manage_permissions`, `view_audit_logs`
+
+**Rhino Origin**: `view`, `create`, `edit`, `delete`, `approve` on `origin_sheets`
+
+**Rhino Code**: `view`, `create`, `edit`, `delete` on `product_codes`
+
+**Rhino Stock**: `view`, `create`, `delete`, `adjust_inventory` on `inventory`
+
+### Default Role Permissions (seeded in migration)
+
+| Role | Gets |
+|------|------|
+| `super_admin` | All permissions across all apps |
+| `admin` | Everything except `manage_roles` and `manage_permissions` |
+| `editor` | `view`, `create`, `edit` across all child apps (no access app perms) |
+| `quality_assurance` | `view`, `approve` across all child apps |
+| `approver` | `view`, `approve` across all child apps |
+| `viewer` | `view` only across all child apps |
+
+### User-Specific Overrides
+
+On the `/users/[id]` page, admins can grant or deny individual permissions beyond the user's role:
+- **Grant** (green) — gives a permission the role doesn't include
+- **Deny** (red) — revokes a permission the role normally includes
+- Overrides are stored in `user_permissions` with `granted: true/false`
+- Deny always wins over both role grants and user grants
+
+### How Permission Checks Work
+
+**Server-side (API routes):**
+```typescript
+// Check a specific permission
+const result = await requirePermission(request, 'access', 'manage_users');
+if (result instanceof NextResponse) return result; // 401 or 403
+
+// Check minimum hierarchy level
+const result = await requireMinLevel(request, 80);
+if (result instanceof NextResponse) return result;
+```
+
+**Client-side (React components):**
+```typescript
+const { hasPermission, role } = useRole();
+if (hasPermission('origin', 'edit', 'origin_sheets')) { /* show edit UI */ }
+```
+
+**Child apps (same Supabase project, no HTTP needed):**
+```typescript
+// Check single permission
+const { data: canEdit } = await supabase.rpc('user_has_permission', {
+  p_app: 'origin', p_action: 'edit', p_resource: 'origin_sheets'
+});
+
+// Get all permissions at once
+const { data: perms } = await supabase.rpc('get_user_permissions', {
+  p_user_id: user.id
+});
+```
+
+### New User Flow
+
+1. Admin invites user via `/users` page → calls `POST /api/admin/users/invite`
+2. Supabase sends invite email via `adminClient.auth.admin.inviteUserByEmail()`
+3. User's role is assigned immediately in `user_roles`
+4. If a user signs up directly (not invited), the `on_auth_user_created` trigger auto-assigns `viewer` role
+
+### User Deletion
+
+- `DELETE /api/admin/users/[userId]` permanently removes a user
+- Cleans up `user_permissions` and `user_roles` before deleting from `auth.users`
+- Protected by hierarchy check — cannot delete users at or above your own level
+- Cannot delete yourself
+
+---
+
+## Database
+
+### Tables
+
+| Table | Purpose |
+|-------|---------|
+| `auth.users` | Built-in Supabase auth users |
+| `roles` | Role definitions (name, display_name, hierarchy_level, is_system) |
+| `permissions` | Permission definitions (app, action, resource, display_name) |
+| `role_permissions` | Junction: default permissions per role |
+| `user_permissions` | Per-user overrides (granted boolean for grant/deny) |
+| `user_roles` | Maps user_id → role_id (one role per user, UNIQUE on user_id) |
+| `audit_logs` | Tracks changes (id, user_id, user_email, action, resource_type, resource_id, old_data, new_data, ip_address, user_agent, created_at) |
+
+### RPC Functions (usable by all apps)
+- `user_has_permission(p_app, p_action, p_resource)` — returns boolean for current auth user
+- `get_user_permissions(p_user_id)` — returns table of (app, action, resource) for a user
+- `current_user_hierarchy_level()` — returns int for current auth user (used in RLS policies)
+
+### Triggers
+- `on_auth_user_created` on `auth.users` — auto-assigns `viewer` role to new users
+- `audit_user_role_changes` on `user_roles` — logs role changes to `audit_logs`
+- `set_roles_updated_at` / `set_user_roles_updated_at` — auto-updates `updated_at`
+
+### RLS Policy Summary
+- `roles` / `permissions` — all authenticated can read; only super_admin (level 100) can modify
+- `role_permissions` — admin+ (level 80) can read; only super_admin can modify
+- `user_roles` — users can read their own; admin+ can read all; admin+ can insert/update with hierarchy check
+- `user_permissions` — users can read their own; admin+ can read/manage all
+- `audit_logs` — admin+ can read (policy recreated by migration to use new schema)
+- `product_codes` — admin+ can create/update/delete; QA+ (level 50) can toggle verified
+
+### Migration
+- `supabase/migrations/001_expand_rbac.sql` — Full migration file. Run in Supabase SQL editor.
+- The migration handles: creating new tables, seeding roles/permissions/role_permissions, migrating `user_roles` from varchar `role` to FK `role_id`, dropping and recreating dependent RLS policies on `audit_logs` and `product_codes`, adding RPC functions, triggers, and RLS policies.
+- After running the migration, promote yourself to super_admin:
+  ```sql
+  UPDATE public.user_roles
+  SET role_id = (SELECT id FROM public.roles WHERE name = 'super_admin'),
+      assigned_by = user_id
+  WHERE user_id = (SELECT id FROM auth.users WHERE email = 'your@email.com');
+  ```
+
+---
+
+## Routing & Pages
+
+| Route | Access | Description |
+|-------|--------|-------------|
+| `/login` | Public | Email/password login |
+| `/signup` | Public | Account registration |
+| `/` | Authenticated | Dashboard — user info, permission summary, quick actions |
+| `/users` | `manage_users` | User list with search, invite modal, remove button |
+| `/users/[id]` | `manage_users` | User detail: role selector, permission matrix, remove |
+| `/apps` | `manage_users` | Per-app overview (permission and user counts) |
+| `/audit` | `view_audit_logs` | Audit log viewer with filtering |
+| `/admin` | Any | Legacy redirect to `/users` |
 
 ### API Routes
-- `GET /api/me/permissions` — Current user's role + resolved permissions
-- `GET /api/admin/users` — List all users with roles
-- `GET /api/admin/users/[userId]` — User detail with role permission IDs
-- `PUT /api/admin/users/[userId]/role` — Update user's role (Zod-validated)
-- `GET/PUT /api/admin/users/[userId]/permissions` — User-specific permission overrides
-- `POST /api/admin/users/invite` — Invite user by email with role
-- `GET /api/admin/roles` — List all roles
-- `GET /api/admin/roles/[roleId]/permissions` — Role's default permission IDs
-- `GET /api/admin/permissions` — List all permission definitions
-- `GET /api/admin/apps` — Per-app summary stats
-- `GET /api/admin/audit` — Audit log entries
 
-### UI Components
-- `components/Header.tsx` — Top nav with permission-gated links + user menu
-- `components/ui/Toast.tsx` — Global toast notifications (call `toast(type, message)` from anywhere)
-- `components/ui/Modal.tsx` — Reusable modal with escape/overlay-click close
-- `components/ui/RoleBadge.tsx` — Color-coded role badge
+| Method | Route | Guard | Description |
+|--------|-------|-------|-------------|
+| GET | `/api/me/permissions` | `requireAuth` | Current user's role + resolved permissions |
+| GET | `/api/admin/users` | `manage_users` | List all users with roles |
+| GET | `/api/admin/users/[userId]` | `manage_users` | User detail with role permission IDs |
+| DELETE | `/api/admin/users/[userId]` | `requireMinLevel(80)` + hierarchy check | Permanently remove user |
+| PUT | `/api/admin/users/[userId]/role` | `manage_users` + hierarchy check | Update user's role |
+| GET/PUT | `/api/admin/users/[userId]/permissions` | `manage_permissions` | User-specific permission overrides |
+| POST | `/api/admin/users/invite` | `manage_users` + hierarchy check | Invite user by email with role |
+| GET | `/api/admin/roles` | `requireAuth` | List all roles |
+| GET | `/api/admin/roles/[roleId]/permissions` | `manage_users` | Role's default permission IDs |
+| GET | `/api/admin/permissions` | `requireAuth` | List all permission definitions |
+| GET | `/api/admin/apps` | `manage_users` | Per-app summary stats |
+| GET | `/api/admin/audit` | `view_audit_logs` | Audit log entries |
 
-### Database Migration
-- `supabase/migrations/001_expand_rbac.sql` — Full migration for the RBAC expansion (roles, permissions, role_permissions, user_permissions, RLS policies, triggers, RPC functions)
+---
+
+## UI Components
+
+- `components/Header.tsx` — Top nav with permission-gated links (Dashboard, Users, Apps, Audit), active state, user menu with RoleBadge
+- `components/ui/Toast.tsx` — Global toast system. Import `toast('success' | 'error' | 'info', message)` from anywhere.
+- `components/ui/Modal.tsx` — Reusable modal with escape key + overlay click to close
+- `components/ui/RoleBadge.tsx` — Color-coded badge using `ROLE_COLORS` from permissions.ts
 
 ### Path Alias
 `@/*` maps to the project root (configured in `tsconfig.json`).
-
-### How Child Apps Check Permissions
-All child apps share the same Supabase project. They call the RPC functions directly — no cross-app HTTP needed:
-```typescript
-const { data: hasAccess } = await supabase.rpc('user_has_permission', {
-  p_app: 'origin', p_action: 'edit', p_resource: 'origin_sheets'
-});
-```
