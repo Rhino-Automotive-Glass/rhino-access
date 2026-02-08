@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import Header from '@/app/components/Header'
 import { signOut } from '@/app/lib/auth/actions'
 import { RoleProvider } from '@/app/contexts/RoleContext'
+import ToastContainer from '@/app/components/ui/Toast'
 
 export default async function DashboardLayout({
   children,
@@ -22,6 +23,7 @@ export default async function DashboardLayout({
     <RoleProvider>
       <Header onSignOut={signOut} />
       {children}
+      <ToastContainer />
     </RoleProvider>
   )
 }

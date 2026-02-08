@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '../supabase/server';
-import { UserRole } from './types';
+import type { SupabaseClient, User } from '@supabase/supabase-js';
 
-export async function requireAuth(request: NextRequest) {
+interface AuthResult {
+  user: User;
+  supabase: SupabaseClient;
+}
+
+interface AuthWithLevelResult extends AuthResult {
+  hierarchyLevel: number;
+}
+
+export async function requireAuth(
+  _request: NextRequest
+): Promise<NextResponse | AuthResult> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -15,52 +26,58 @@ export async function requireAuth(request: NextRequest) {
   return { user, supabase };
 }
 
-export async function requireRole(
+/**
+ * Check if the user has a specific permission (via role or user override).
+ * Uses the DB function user_has_permission().
+ */
+export async function requirePermission(
   request: NextRequest,
-  allowedRoles: UserRole[]
-) {
+  app: string,
+  action: string,
+  resource?: string
+): Promise<NextResponse | AuthResult> {
   const authResult = await requireAuth(request);
-  if (authResult instanceof NextResponse) {
-    return authResult;
-  }
+  if (authResult instanceof NextResponse) return authResult;
 
   const { user, supabase } = authResult;
 
-  const { data: roleData, error: roleError } = await supabase
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', user.id)
-    .single();
+  const { data, error } = await supabase.rpc('user_has_permission', {
+    p_app: app,
+    p_action: action,
+    p_resource: resource ?? null,
+  });
 
-  if (roleError || !roleData) {
-    const userRole = 'viewer' as UserRole;
-    if (!allowedRoles.includes(userRole)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-    return { user, supabase, role: userRole };
-  }
-
-  const userRole = roleData.role as UserRole;
-  if (!allowedRoles.includes(userRole)) {
+  if (error || !data) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  return { user, supabase, role: userRole };
+  return { user, supabase };
 }
 
-export async function getUserRole(
-  userId: string,
-  supabase: any
-): Promise<UserRole> {
-  const { data, error } = await supabase
+/**
+ * Check if the user meets a minimum hierarchy level.
+ * Useful for admin-gated endpoints that don't map to a single permission.
+ */
+export async function requireMinLevel(
+  request: NextRequest,
+  minLevel: number
+): Promise<NextResponse | AuthWithLevelResult> {
+  const authResult = await requireAuth(request);
+  if (authResult instanceof NextResponse) return authResult;
+
+  const { user, supabase } = authResult;
+
+  const { data } = await supabase
     .from('user_roles')
-    .select('role')
-    .eq('user_id', userId)
+    .select('role_id, roles(hierarchy_level)')
+    .eq('user_id', user.id)
     .single();
 
-  if (error || !data) {
-    return 'viewer';
+  const rolesJoin = data?.roles as unknown as { hierarchy_level: number } | null;
+  const level = rolesJoin?.hierarchy_level ?? 0;
+  if (level < minLevel) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  return data.role as UserRole;
+  return { user, supabase, hierarchyLevel: level };
 }

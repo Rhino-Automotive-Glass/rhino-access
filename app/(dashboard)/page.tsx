@@ -2,9 +2,11 @@
 
 import { useRole } from '@/app/contexts/RoleContext';
 import Link from 'next/link';
+import RoleBadge from '@/app/components/ui/RoleBadge';
+import { APP_CONFIG } from '@/app/lib/rbac/permissions';
 
 export default function DashboardPage() {
-  const { user, role, permissions, isLoading } = useRole();
+  const { user, role, permissions, isLoading, hasPermission } = useRole();
 
   if (isLoading) {
     return (
@@ -16,6 +18,15 @@ export default function DashboardPage() {
       </div>
     );
   }
+
+  // Group permissions by app for display
+  const permsByApp = permissions.reduce(
+    (acc, p) => {
+      (acc[p.app] ??= []).push(p);
+      return acc;
+    },
+    {} as Record<string, typeof permissions>
+  );
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-slate-50">
@@ -29,7 +40,7 @@ export default function DashboardPage() {
           {/* User Info Card */}
           <div className="card p-6">
             <h2 className="text-lg font-semibold text-slate-800 mb-3">Your Account</h2>
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div>
                 <span className="text-xs text-slate-500 uppercase tracking-wide">Email</span>
                 <p className="text-sm text-slate-700">{user?.email}</p>
@@ -37,45 +48,55 @@ export default function DashboardPage() {
               <div>
                 <span className="text-xs text-slate-500 uppercase tracking-wide">Role</span>
                 <div className="mt-1">
-                  <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
-                    role === 'admin'
-                      ? 'bg-purple-100 text-purple-800'
-                      : role === 'qa'
-                      ? 'bg-blue-100 text-blue-800'
-                      : 'bg-gray-100 text-gray-800'
-                  }`}>
-                    {role === 'qa' ? 'QA' : role}
-                  </span>
+                  {role && <RoleBadge roleName={role.name} displayName={role.display_name} />}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Permissions Card */}
+          {/* Permissions Summary Card */}
           <div className="card p-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-3">Permissions</h2>
-            <ul className="space-y-2">
-              <li className="flex items-center gap-2">
-                <span className={`inline-block w-2 h-2 rounded-full ${permissions?.canManageUsers ? 'bg-green-500' : 'bg-gray-300'}`}></span>
-                <span className="text-sm text-slate-700">Manage Users</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className={`inline-block w-2 h-2 rounded-full ${permissions?.canViewAuditLogs ? 'bg-green-500' : 'bg-gray-300'}`}></span>
-                <span className="text-sm text-slate-700">View Audit Logs</span>
-              </li>
-            </ul>
+            <h2 className="text-lg font-semibold text-slate-800 mb-3">Your Permissions</h2>
+            {Object.keys(permsByApp).length === 0 ? (
+              <p className="text-sm text-slate-500">No permissions assigned</p>
+            ) : (
+              <div className="space-y-3">
+                {Object.entries(permsByApp).map(([app, perms]) => {
+                  const appInfo = APP_CONFIG.find((a) => a.key === app);
+                  return (
+                    <div key={app}>
+                      <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+                        {appInfo?.name ?? app}
+                      </span>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {perms.map((p, i) => (
+                          <span
+                            key={i}
+                            className="inline-block px-2 py-0.5 text-xs bg-slate-100 text-slate-600 rounded"
+                          >
+                            {p.action}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Quick Actions Card */}
-          {permissions?.canManageUsers && (
+          {hasPermission('access', 'manage_users') && (
             <div className="card p-6">
               <h2 className="text-lg font-semibold text-slate-800 mb-3">Quick Actions</h2>
-              <Link
-                href="/admin"
-                className="btn btn-primary btn-md w-full"
-              >
-                Go to Admin Panel
-              </Link>
+              <div className="space-y-2">
+                <Link href="/users" className="btn btn-primary btn-md w-full">
+                  Manage Users
+                </Link>
+                <Link href="/apps" className="btn btn-secondary btn-md w-full">
+                  View Apps
+                </Link>
+              </div>
             </div>
           )}
         </div>

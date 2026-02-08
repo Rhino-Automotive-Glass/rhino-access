@@ -1,72 +1,79 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User } from '@supabase/supabase-js';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  ReactNode,
+} from 'react';
 import { createClient } from '@/app/lib/supabase/client';
-import { UserRole, RolePermissions } from '@/app/lib/rbac/types';
-import { getPermissions } from '@/app/lib/rbac/permissions';
+import type { Role, Permission } from '@/app/lib/rbac/types';
+
+interface UserInfo {
+  id: string;
+  email: string;
+}
 
 interface RoleContextType {
-  user: User | null;
-  role: UserRole | null;
-  permissions: RolePermissions | null;
+  user: UserInfo | null;
+  role: Role | null;
+  permissions: Permission[];
   isLoading: boolean;
+  hasPermission: (app: string, action: string, resource?: string) => boolean;
   refreshRole: () => Promise<void>;
 }
 
 const RoleContext = createContext<RoleContextType>({
   user: null,
   role: null,
-  permissions: null,
+  permissions: [],
   isLoading: true,
+  hasPermission: () => false,
   refreshRole: async () => {},
 });
 
 export function RoleProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [role, setRole] = useState<UserRole | null>(null);
-  const [permissions, setPermissions] = useState<RolePermissions | null>(null);
+  const [user, setUser] = useState<UserInfo | null>(null);
+  const [role, setRole] = useState<Role | null>(null);
+  const [permissions, setPermissions] = useState<Permission[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-
   const supabase = createClient();
 
-  const fetchUserRole = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId)
-      .single();
-
-    if (error || !data) {
-      return 'viewer' as UserRole;
-    }
-
-    return data.role as UserRole;
-  };
-
-  const refreshRole = async () => {
+  const refreshRole = useCallback(async () => {
     setIsLoading(true);
     try {
-      const {
-        data: { user: currentUser },
-      } = await supabase.auth.getUser();
-
-      if (currentUser) {
-        setUser(currentUser);
-        const userRole = await fetchUserRole(currentUser.id);
-        setRole(userRole);
-        setPermissions(getPermissions(userRole));
+      const res = await fetch('/api/me/permissions');
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+        setRole(data.role);
+        setPermissions(data.permissions ?? []);
       } else {
         setUser(null);
         setRole(null);
-        setPermissions(null);
+        setPermissions([]);
       }
-    } catch (error) {
-      console.error('Error fetching role:', error);
+    } catch {
+      // silent — dashboard layout will redirect to login if unauthenticated
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
+
+  const hasPermission = useCallback(
+    (app: string, action: string, resource?: string): boolean => {
+      if (role?.name === 'super_admin') return true;
+      return permissions.some(
+        (p) =>
+          p.app === app &&
+          p.action === action &&
+          (resource == null || p.resource === resource)
+      );
+    },
+    [role, permissions]
+  );
 
   useEffect(() => {
     refreshRole();
@@ -79,7 +86,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       } else {
         setUser(null);
         setRole(null);
-        setPermissions(null);
+        setPermissions([]);
         setIsLoading(false);
       }
     });
@@ -87,11 +94,12 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshRole]);
 
   return (
     <RoleContext.Provider
-      value={{ user, role, permissions, isLoading, refreshRole }}
+      value={{ user, role, permissions, isLoading, hasPermission, refreshRole }}
     >
       {children}
     </RoleContext.Provider>
