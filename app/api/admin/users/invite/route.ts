@@ -53,8 +53,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Invite the user via Supabase admin
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
     const { data, error } = await adminClient.auth.admin.inviteUserByEmail(
-      email
+      email,
+      { redirectTo: `${siteUrl}/api/auth/callback` }
     );
 
     if (error) {

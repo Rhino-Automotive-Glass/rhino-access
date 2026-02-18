@@ -198,9 +198,10 @@ export default function UserDetailPage({
     {} as Record<string, PermissionDef[]>
   );
 
-  const assignableRoles = roles.filter(
-    (r) => r.hierarchy_level < (myRole?.hierarchy_level ?? 0)
-  );
+  const myLevel = myRole?.hierarchy_level ?? 0;
+  const assignableRoles = roles.filter((r) => r.hierarchy_level < myLevel);
+  const currentRoleIsAboveMe =
+    userDetail?.role && userDetail.role.hierarchy_level >= myLevel;
 
   if (authLoading || isLoading) {
     return (
@@ -258,20 +259,31 @@ export default function UserDetailPage({
         <div className="card p-6 mb-6">
           <h2 className="text-lg font-semibold text-slate-800 mb-3">Role</h2>
           <div className="flex items-center gap-4">
-            <select
-              value={selectedRoleId}
-              onChange={(e) => handleRoleChange(e.target.value)}
-              disabled={saving}
-              className="input-base max-w-xs"
-            >
-              {assignableRoles.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.display_name}
-                </option>
-              ))}
-            </select>
-            {userDetail.role && (
-              <RoleBadge roleName={userDetail.role.name} displayName={userDetail.role.display_name} />
+            {currentRoleIsAboveMe ? (
+              <div className="flex items-center gap-3">
+                <RoleBadge roleName={userDetail.role.name} displayName={userDetail.role.display_name} />
+                <span className="text-xs text-slate-500">
+                  You cannot change a role at or above your level
+                </span>
+              </div>
+            ) : (
+              <>
+                <select
+                  value={selectedRoleId}
+                  onChange={(e) => handleRoleChange(e.target.value)}
+                  disabled={saving}
+                  className="input-base max-w-xs"
+                >
+                  {assignableRoles.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.display_name}
+                    </option>
+                  ))}
+                </select>
+                {userDetail.role && (
+                  <RoleBadge roleName={userDetail.role.name} displayName={userDetail.role.display_name} />
+                )}
+              </>
             )}
           </div>
         </div>
