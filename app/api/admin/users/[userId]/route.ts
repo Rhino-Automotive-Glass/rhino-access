@@ -2,6 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission, requireMinLevel } from '@/app/lib/rbac/apiMiddleware';
 import { createAdminClient } from '@/app/lib/supabase/admin';
 
+function logDeleteStepError(
+  step: string,
+  userId: string,
+  error: { message: string }
+) {
+  console.error(`Delete user failed during ${step}`, {
+    userId,
+    error: error.message,
+  });
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ userId: string }> }
@@ -80,6 +91,7 @@ export async function DELETE(
   try {
     const { userId } = await params;
     const { user, supabase, hierarchyLevel } = authResult;
+    const adminClient = createAdminClient();
 
     // Prevent self-deletion
     if (userId === user.id) {
@@ -107,17 +119,61 @@ export async function DELETE(
       );
     }
 
-    const adminClient = createAdminClient();
+    const {
+      data: targetAuthUser,
+      error: targetAuthError,
+    } = await adminClient.auth.admin.getUserById(userId);
 
-    // Clean up: user_permissions and user_roles will cascade from auth.users FK,
-    // but delete explicitly for audit clarity
-    await supabase.from('user_permissions').delete().eq('user_id', userId);
-    await supabase.from('user_roles').delete().eq('user_id', userId);
+    if (targetAuthError || !targetAuthUser.user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    const cleanupSteps = [
+      {
+        name: 'clearing audit log actor references',
+        run: () =>
+          adminClient.from('audit_logs').update({ user_id: null }).eq('user_id', userId),
+      },
+      {
+        name: 'clearing role assignment references',
+        run: () =>
+          adminClient.from('user_roles').update({ assigned_by: null }).eq('assigned_by', userId),
+      },
+      {
+        name: 'clearing permission grant references',
+        run: () =>
+          adminClient
+            .from('user_permissions')
+            .update({ granted_by: null })
+            .eq('granted_by', userId),
+      },
+      {
+        name: 'deleting user permission overrides',
+        run: () =>
+          adminClient.from('user_permissions').delete().eq('user_id', userId),
+      },
+      {
+        name: 'deleting user role assignments',
+        run: () => adminClient.from('user_roles').delete().eq('user_id', userId),
+      },
+    ];
+
+    for (const step of cleanupSteps) {
+      const { error } = await step.run();
+      if (error) {
+        logDeleteStepError(step.name, userId, error);
+        return NextResponse.json(
+          { error: 'Failed to remove related user records' },
+          { status: 400 }
+        );
+      }
+    }
 
     // Delete the auth user (this is permanent)
     const { error } = await adminClient.auth.admin.deleteUser(userId);
 
     if (error) {
+      logDeleteStepError('deleting auth user', userId, error);
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
