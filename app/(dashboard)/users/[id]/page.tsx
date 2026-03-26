@@ -177,7 +177,7 @@ export default function UserDetailPage({
     setDeleting(true);
     const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
     if (res.ok) {
-      toast('success', `${userDetail?.email} has been removed`);
+      toast('success', `${userDetail?.email} access has been removed`);
       router.push('/users');
     } else {
       const err = await res.json();
@@ -372,9 +372,10 @@ export default function UserDetailPage({
       >
         <div className="space-y-4">
           <p className="text-sm text-slate-600">
-            Are you sure you want to permanently remove{' '}
+            Are you sure you want to remove{' '}
             <span className="font-semibold text-slate-900">{userDetail.email}</span>?
-            This will delete their account, role, and all permission overrides. This action cannot be undone.
+            This will revoke their role and permission overrides, and deactivate their sign-in
+            while preserving audit history. This action cannot be undone from the app.
           </p>
           <div className="flex justify-end gap-3 pt-2">
             <button

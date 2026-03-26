@@ -106,7 +106,7 @@ export default function UsersPage() {
     });
 
     if (res.ok) {
-      toast('success', `${deleteTarget.email} has been removed`);
+      toast('success', `${deleteTarget.email} access has been removed`);
       setDeleteTarget(null);
       await loadData();
     } else {
@@ -291,9 +291,10 @@ export default function UsersPage() {
       >
         <div className="space-y-4">
           <p className="text-sm text-slate-600">
-            Are you sure you want to permanently remove{' '}
+            Are you sure you want to remove{' '}
             <span className="font-semibold text-slate-900">{deleteTarget?.email}</span>?
-            This will delete their account, role, and all permission overrides. This action cannot be undone.
+            This will revoke their role and permission overrides, and deactivate their sign-in
+            while preserving audit history. This action cannot be undone from the app.
           </p>
           <div className="flex justify-end gap-3 pt-2">
             <button

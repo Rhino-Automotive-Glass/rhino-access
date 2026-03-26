@@ -18,6 +18,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: userError.message }, { status: 400 });
     }
 
+    const activeUsers = (userData.users ?? []).filter((user) => !user.deleted_at);
+
     // Get user_roles joined with roles table
     const { data: rolesData, error: rolesError } = await supabase
       .from('user_roles')
@@ -34,7 +36,7 @@ export async function GET(request: NextRequest) {
       hierarchy_level: 10,
     };
 
-    const usersWithRoles = userData.users.map((user) => {
+    const usersWithRoles = activeUsers.map((user) => {
       const userRoleRow = rolesData?.find(
         (r: { user_id: string }) => r.user_id === user.id
       );

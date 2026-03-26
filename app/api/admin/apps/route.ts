@@ -18,7 +18,8 @@ export async function GET(request: NextRequest) {
 
     // Get all users count
     const { data: usersData } = await adminClient.auth.admin.listUsers();
-    const totalUsers = usersData?.users?.length ?? 0;
+    const totalUsers =
+      usersData?.users?.filter((user) => !user.deleted_at).length ?? 0;
 
     // Group permission counts by app
     const appMap = new Map<string, { total_permissions: number }>();

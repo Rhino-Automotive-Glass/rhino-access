@@ -29,7 +29,7 @@ export async function GET(
     const { data: authUser, error: authError } =
       await adminClient.auth.admin.getUserById(userId);
 
-    if (authError || !authUser.user) {
+    if (authError || !authUser.user || authUser.user.deleted_at) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
@@ -124,29 +124,11 @@ export async function DELETE(
       error: targetAuthError,
     } = await adminClient.auth.admin.getUserById(userId);
 
-    if (targetAuthError || !targetAuthUser.user) {
+    if (targetAuthError || !targetAuthUser.user || targetAuthUser.user.deleted_at) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     const cleanupSteps = [
-      {
-        name: 'clearing audit log actor references',
-        run: () =>
-          adminClient.from('audit_logs').update({ user_id: null }).eq('user_id', userId),
-      },
-      {
-        name: 'clearing role assignment references',
-        run: () =>
-          adminClient.from('user_roles').update({ assigned_by: null }).eq('assigned_by', userId),
-      },
-      {
-        name: 'clearing permission grant references',
-        run: () =>
-          adminClient
-            .from('user_permissions')
-            .update({ granted_by: null })
-            .eq('granted_by', userId),
-      },
       {
         name: 'deleting user permission overrides',
         run: () =>
@@ -169,8 +151,8 @@ export async function DELETE(
       }
     }
 
-    // Delete the auth user (this is permanent)
-    const { error } = await adminClient.auth.admin.deleteUser(userId);
+    // Soft-delete the auth user so history tables can keep their FK references.
+    const { error } = await adminClient.auth.admin.deleteUser(userId, true);
 
     if (error) {
       logDeleteStepError('deleting auth user', userId, error);
