@@ -227,7 +227,8 @@ CREATE POLICY "Only admins can fully update products"
     )
   );
 
--- product_codes: QA (hierarchy 50+) can toggle verified field
+-- product_codes: QA-level users can toggle verified field only.
+-- The trigger created in section 6 enforces the column-level restriction.
 CREATE POLICY "QA can toggle verified field only"
   ON public.product_codes FOR UPDATE
   TO authenticated
@@ -235,14 +236,18 @@ CREATE POLICY "QA can toggle verified field only"
     EXISTS (
       SELECT 1 FROM public.user_roles ur
       JOIN public.roles r ON r.id = ur.role_id
-      WHERE ur.user_id = auth.uid() AND r.hierarchy_level >= 50
+      WHERE ur.user_id = auth.uid()
+        AND r.hierarchy_level >= 50
+        AND r.hierarchy_level < 80
     )
   )
   WITH CHECK (
     EXISTS (
       SELECT 1 FROM public.user_roles ur
       JOIN public.roles r ON r.id = ur.role_id
-      WHERE ur.user_id = auth.uid() AND r.hierarchy_level >= 50
+      WHERE ur.user_id = auth.uid()
+        AND r.hierarchy_level >= 50
+        AND r.hierarchy_level < 80
     )
   );
 
@@ -308,6 +313,41 @@ SET search_path = public
 AS $$
   SELECT public.user_hierarchy_level(auth.uid());
 $$;
+
+-- Enforce column-level safety for QA product verification updates.
+-- RLS decides which rows QA users may touch; this trigger ensures QA users
+-- cannot change anything except verified. Admins keep full update access.
+CREATE OR REPLACE FUNCTION public.enforce_product_codes_verified_only_update()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  actor_level int := public.current_user_hierarchy_level();
+BEGIN
+  IF auth.role() = 'service_role' THEN
+    RETURN NEW;
+  END IF;
+
+  IF actor_level >= 80 THEN
+    RETURN NEW;
+  END IF;
+
+  IF actor_level >= 50
+     AND (to_jsonb(NEW) - 'verified') IS NOT DISTINCT FROM (to_jsonb(OLD) - 'verified') THEN
+    RETURN NEW;
+  END IF;
+
+  RAISE EXCEPTION 'QA users can only update product_codes.verified'
+    USING ERRCODE = '42501';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS aaa_enforce_product_codes_verified_only_update ON public.product_codes;
+CREATE TRIGGER aaa_enforce_product_codes_verified_only_update
+  BEFORE UPDATE ON public.product_codes
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_product_codes_verified_only_update();
 
 -- Check if current user has a specific permission
 CREATE OR REPLACE FUNCTION public.user_has_permission(
