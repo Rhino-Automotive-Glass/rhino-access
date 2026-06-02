@@ -94,8 +94,6 @@ export async function DELETE(
 
   try {
     const { userId } = await params;
-    const { user, supabase, hierarchyLevel } = authResult;
-    const adminClient = createAdminClient();
     const { user, supabase } = authResult;
 
     // Prevent self-deletion
