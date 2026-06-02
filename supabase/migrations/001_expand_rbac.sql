@@ -350,6 +350,8 @@ CREATE TRIGGER aaa_enforce_product_codes_verified_only_update
   FOR EACH ROW EXECUTE FUNCTION public.enforce_product_codes_verified_only_update();
 
 -- Check if current user has a specific permission
+-- Resource matching is exact: NULL only matches NULL, and concrete resources
+-- only match the same concrete resource.
 CREATE OR REPLACE FUNCTION public.user_has_permission(
   p_app text,
   p_action text,
@@ -369,7 +371,7 @@ AS $$
     WHERE ur.user_id = auth.uid()
       AND p.app = p_app
       AND p.action = p_action
-      AND (p_resource IS NULL OR p.resource = p_resource)
+      AND p.resource IS NOT DISTINCT FROM p_resource
 
     UNION ALL
 
@@ -380,7 +382,7 @@ AS $$
       AND up.granted = true
       AND p.app = p_app
       AND p.action = p_action
-      AND (p_resource IS NULL OR p.resource = p_resource)
+      AND p.resource IS NOT DISTINCT FROM p_resource
   )
   AND NOT EXISTS (
     SELECT 1
@@ -390,7 +392,7 @@ AS $$
       AND up.granted = false
       AND p.app = p_app
       AND p.action = p_action
-      AND (p_resource IS NULL OR p.resource = p_resource)
+      AND p.resource IS NOT DISTINCT FROM p_resource
   );
 $$;
 

@@ -65,11 +65,13 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const hasPermission = useCallback(
     (app: string, action: string, resource?: string): boolean => {
       if (role?.name === 'super_admin') return true;
+      const requestedResource = resource ?? null;
+
       return permissions.some(
         (p) =>
           p.app === app &&
           p.action === action &&
-          (resource == null || p.resource === resource)
+          p.resource === requestedResource
       );
     },
     [role, permissions]

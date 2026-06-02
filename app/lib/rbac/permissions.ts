@@ -9,11 +9,13 @@ export function hasPermission(
   action: string,
   resource?: string
 ): boolean {
+  const requestedResource = resource ?? null;
+
   return permissions.some(
     (p) =>
       p.app === app &&
       p.action === action &&
-      (resource == null || p.resource === resource)
+      p.resource === requestedResource
   );
 }
 
