@@ -50,8 +50,15 @@ export async function PUT(
 
     const parsed = updateUserPermissionsSchema.safeParse(body);
     if (!parsed.success) {
+      const { fieldErrors, formErrors } = parsed.error.flatten();
       return NextResponse.json(
-        { error: parsed.error.flatten().fieldErrors },
+        {
+          error:
+            formErrors[0] ??
+            fieldErrors.grants?.[0] ??
+            fieldErrors.revokes?.[0] ??
+            fieldErrors,
+        },
         { status: 400 }
       );
     }
@@ -67,52 +74,17 @@ export async function PUT(
     );
     if (hierarchyResult instanceof NextResponse) return hierarchyResult;
 
-    // Delete existing overrides for this user
-    await supabase
-      .from('user_permissions')
-      .delete()
-      .eq('user_id', userId);
+    const { error } = await supabase.rpc('replace_user_permission_overrides', {
+      p_user_id: userId,
+      p_grants: grants,
+      p_revokes: revokes,
+    });
 
-    // Insert grants
-    if (grants.length > 0) {
-      const grantRows = grants.map((permId) => ({
-        user_id: userId,
-        permission_id: permId,
-        granted: true,
-        granted_by: user.id,
-      }));
-
-      const { error: grantError } = await supabase
-        .from('user_permissions')
-        .insert(grantRows);
-
-      if (grantError) {
-        return NextResponse.json(
-          { error: grantError.message },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Insert revokes (deny overrides)
-    if (revokes.length > 0) {
-      const revokeRows = revokes.map((permId) => ({
-        user_id: userId,
-        permission_id: permId,
-        granted: false,
-        granted_by: user.id,
-      }));
-
-      const { error: revokeError } = await supabase
-        .from('user_permissions')
-        .insert(revokeRows);
-
-      if (revokeError) {
-        return NextResponse.json(
-          { error: revokeError.message },
-          { status: 400 }
-        );
-      }
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.code === '42501' ? 403 : 400 }
+      );
     }
 
     return NextResponse.json({ success: true });
