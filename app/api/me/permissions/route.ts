@@ -14,10 +14,8 @@ export async function GET(request: NextRequest) {
     .eq('user_id', user.id)
     .single();
 
-  // Get resolved permissions via RPC
-  const { data: perms, error } = await supabase.rpc('get_user_permissions', {
-    p_user_id: user.id,
-  });
+  // Get resolved permissions via safe current-user RPC
+  const { data: perms, error } = await supabase.rpc('get_my_permissions');
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
