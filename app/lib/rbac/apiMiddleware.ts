@@ -11,9 +11,16 @@ interface AuthWithLevelResult extends AuthResult {
   hierarchyLevel: number;
 }
 
+interface TargetHierarchyResult {
+  requesterLevel: number;
+  targetLevel: number;
+}
+
 export async function requireAuth(
   _request: NextRequest
 ): Promise<NextResponse | AuthResult> {
+  void _request;
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -54,6 +61,39 @@ export async function requirePermission(
   return { user, supabase };
 }
 
+export async function getUserHierarchyLevel(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<number> {
+  const { data } = await supabase
+    .from('user_roles')
+    .select('roles(hierarchy_level)')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const rolesJoin = data?.roles as unknown as { hierarchy_level: number } | null;
+  return rolesJoin?.hierarchy_level ?? 0;
+}
+
+export async function requireTargetUserBelowRequester(
+  supabase: SupabaseClient,
+  requesterUserId: string,
+  targetUserId: string,
+  action: string
+): Promise<NextResponse | TargetHierarchyResult> {
+  const requesterLevel = await getUserHierarchyLevel(supabase, requesterUserId);
+  const targetLevel = await getUserHierarchyLevel(supabase, targetUserId);
+
+  if (targetLevel >= requesterLevel) {
+    return NextResponse.json(
+      { error: `Cannot ${action} a user at or above your own level` },
+      { status: 403 }
+    );
+  }
+
+  return { requesterLevel, targetLevel };
+}
+
 /**
  * Check if the user meets a minimum hierarchy level.
  * Useful for admin-gated endpoints that don't map to a single permission.
@@ -67,14 +107,7 @@ export async function requireMinLevel(
 
   const { user, supabase } = authResult;
 
-  const { data } = await supabase
-    .from('user_roles')
-    .select('role_id, roles(hierarchy_level)')
-    .eq('user_id', user.id)
-    .single();
-
-  const rolesJoin = data?.roles as unknown as { hierarchy_level: number } | null;
-  const level = rolesJoin?.hierarchy_level ?? 0;
+  const level = await getUserHierarchyLevel(supabase, user.id);
   if (level < minLevel) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }

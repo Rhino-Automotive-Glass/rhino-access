@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requirePermission } from '@/app/lib/rbac/apiMiddleware';
+import {
+  requirePermission,
+  requireTargetUserBelowRequester,
+} from '@/app/lib/rbac/apiMiddleware';
 import { updateUserPermissionsSchema } from '@/app/lib/validations/schemas';
 
 /** GET — list user-specific permission overrides */
@@ -55,6 +58,14 @@ export async function PUT(
 
     const { grants, revokes } = parsed.data;
     const { supabase, user } = authResult;
+
+    const hierarchyResult = await requireTargetUserBelowRequester(
+      supabase,
+      user.id,
+      userId,
+      'update permissions for'
+    );
+    if (hierarchyResult instanceof NextResponse) return hierarchyResult;
 
     // Delete existing overrides for this user
     await supabase

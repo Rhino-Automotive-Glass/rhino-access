@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requirePermission, requireMinLevel } from '@/app/lib/rbac/apiMiddleware';
+import {
+  requirePermission,
+  requireMinLevel,
+  requireTargetUserBelowRequester,
+} from '@/app/lib/rbac/apiMiddleware';
 import { createAdminClient } from '@/app/lib/supabase/admin';
 
 function logDeleteStepError(
@@ -92,6 +96,7 @@ export async function DELETE(
     const { userId } = await params;
     const { user, supabase, hierarchyLevel } = authResult;
     const adminClient = createAdminClient();
+    const { user, supabase } = authResult;
 
     // Prevent self-deletion
     if (userId === user.id) {
@@ -101,58 +106,23 @@ export async function DELETE(
       );
     }
 
-    // Check that target user's role is below the requester's level
-    const { data: targetRole } = await supabase
-      .from('user_roles')
-      .select('roles(hierarchy_level)')
-      .eq('user_id', userId)
-      .single();
+    const hierarchyResult = await requireTargetUserBelowRequester(
+      supabase,
+      user.id,
+      userId,
+      'delete'
+    );
+    if (hierarchyResult instanceof NextResponse) return hierarchyResult;
 
-    const targetLevel =
-      (targetRole?.roles as unknown as { hierarchy_level: number } | null)
-        ?.hierarchy_level ?? 0;
+    const adminClient = createAdminClient();
 
-    if (targetLevel >= hierarchyLevel) {
-      return NextResponse.json(
-        { error: 'Cannot delete a user at or above your own level' },
-        { status: 403 }
-      );
-    }
+    // Clean up: user_permissions and user_roles will cascade from auth.users FK,
+    // but delete explicitly for audit clarity
+    await supabase.from('user_permissions').delete().eq('user_id', userId);
+    await supabase.from('user_roles').delete().eq('user_id', userId);
 
-    const {
-      data: targetAuthUser,
-      error: targetAuthError,
-    } = await adminClient.auth.admin.getUserById(userId);
-
-    if (targetAuthError || !targetAuthUser.user || targetAuthUser.user.deleted_at) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    const cleanupSteps = [
-      {
-        name: 'deleting user permission overrides',
-        run: () =>
-          adminClient.from('user_permissions').delete().eq('user_id', userId),
-      },
-      {
-        name: 'deleting user role assignments',
-        run: () => adminClient.from('user_roles').delete().eq('user_id', userId),
-      },
-    ];
-
-    for (const step of cleanupSteps) {
-      const { error } = await step.run();
-      if (error) {
-        logDeleteStepError(step.name, userId, error);
-        return NextResponse.json(
-          { error: 'Failed to remove related user records' },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Soft-delete the auth user so history tables can keep their FK references.
-    const { error } = await adminClient.auth.admin.deleteUser(userId, true);
+    // Delete the auth user (this is permanent)
+    const { error } = await adminClient.auth.admin.deleteUser(userId);
 
     if (error) {
       logDeleteStepError('deleting auth user', userId, error);

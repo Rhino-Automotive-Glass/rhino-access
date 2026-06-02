@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requirePermission } from '@/app/lib/rbac/apiMiddleware';
+import {
+  requirePermission,
+  requireTargetUserBelowRequester,
+} from '@/app/lib/rbac/apiMiddleware';
 import { createAdminClient } from '@/app/lib/supabase/admin';
 import { inviteUserSchema } from '@/app/lib/validations/schemas';
 
@@ -65,6 +68,14 @@ export async function POST(request: NextRequest) {
 
     // Assign role immediately
     if (data.user) {
+      const hierarchyResult = await requireTargetUserBelowRequester(
+        supabase,
+        adminUser.id,
+        data.user.id,
+        'change the role of'
+      );
+      if (hierarchyResult instanceof NextResponse) return hierarchyResult;
+
       await supabase.from('user_roles').upsert(
         {
           user_id: data.user.id,

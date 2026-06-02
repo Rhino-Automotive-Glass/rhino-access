@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requirePermission } from '@/app/lib/rbac/apiMiddleware';
+import {
+  requirePermission,
+  requireTargetUserBelowRequester,
+} from '@/app/lib/rbac/apiMiddleware';
 import { updateUserRoleSchema } from '@/app/lib/validations/schemas';
 
 export async function PUT(
@@ -32,6 +35,14 @@ export async function PUT(
       );
     }
 
+    const hierarchyResult = await requireTargetUserBelowRequester(
+      supabase,
+      user.id,
+      userId,
+      'change the role of'
+    );
+    if (hierarchyResult instanceof NextResponse) return hierarchyResult;
+
     // Verify the target role exists and is below the current user's level
     const { data: targetRole, error: roleError } = await supabase
       .from('roles')
@@ -43,17 +54,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
     }
 
-    // Get current user's hierarchy level
-    const { data: currentUserRole } = await supabase
-      .from('user_roles')
-      .select('roles(hierarchy_level)')
-      .eq('user_id', user.id)
-      .single();
-
-    const rolesJoin = currentUserRole?.roles as unknown as
-      | { hierarchy_level: number }
-      | null;
-    const myLevel = rolesJoin?.hierarchy_level ?? 0;
+    const myLevel = hierarchyResult.requesterLevel;
 
     if (targetRole.hierarchy_level >= myLevel) {
       return NextResponse.json(

@@ -281,8 +281,8 @@ CREATE TRIGGER set_user_roles_updated_at
   BEFORE UPDATE ON public.user_roles
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 
--- Get current user's hierarchy level
-CREATE OR REPLACE FUNCTION public.current_user_hierarchy_level()
+-- Get a user's hierarchy level
+CREATE OR REPLACE FUNCTION public.user_hierarchy_level(p_user_id uuid)
 RETURNS int
 LANGUAGE sql
 STABLE
@@ -293,9 +293,20 @@ AS $$
     (SELECT r.hierarchy_level
      FROM user_roles ur
      JOIN roles r ON r.id = ur.role_id
-     WHERE ur.user_id = auth.uid()),
+     WHERE ur.user_id = p_user_id),
     0
   );
+$$;
+
+-- Get current user's hierarchy level
+CREATE OR REPLACE FUNCTION public.current_user_hierarchy_level()
+RETURNS int
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT public.user_hierarchy_level(auth.uid());
 $$;
 
 -- Check if current user has a specific permission
@@ -517,22 +528,28 @@ CREATE POLICY "Admins can insert user_roles"
   TO authenticated
   WITH CHECK (
     current_user_hierarchy_level() >= 80
-    AND (SELECT hierarchy_level FROM roles WHERE id = role_id) < current_user_hierarchy_level()
+    AND (SELECT hierarchy_level FROM public.roles WHERE id = role_id) < current_user_hierarchy_level()
   );
 
 CREATE POLICY "Admins can update user_roles"
   ON public.user_roles FOR UPDATE
   TO authenticated
-  USING (current_user_hierarchy_level() >= 80)
+  USING (
+    current_user_hierarchy_level() >= 80
+    AND public.user_hierarchy_level(user_id) < current_user_hierarchy_level()
+  )
   WITH CHECK (
     current_user_hierarchy_level() >= 80
-    AND (SELECT hierarchy_level FROM roles WHERE id = role_id) < current_user_hierarchy_level()
+    AND (SELECT hierarchy_level FROM public.roles WHERE id = role_id) < current_user_hierarchy_level()
   );
 
 CREATE POLICY "Admins can delete user_roles"
   ON public.user_roles FOR DELETE
   TO authenticated
-  USING (current_user_hierarchy_level() >= 80);
+  USING (
+    current_user_hierarchy_level() >= 80
+    AND public.user_hierarchy_level(user_id) < current_user_hierarchy_level()
+  );
 
 -- USER_PERMISSIONS: users can read own, admins+ can read all and manage
 CREATE POLICY "Users can view own permissions"
@@ -548,17 +565,29 @@ CREATE POLICY "Admins can view all user_permissions"
 CREATE POLICY "Admins can insert user_permissions"
   ON public.user_permissions FOR INSERT
   TO authenticated
-  WITH CHECK (current_user_hierarchy_level() >= 80);
+  WITH CHECK (
+    current_user_hierarchy_level() >= 80
+    AND public.user_hierarchy_level(user_id) < current_user_hierarchy_level()
+  );
 
 CREATE POLICY "Admins can update user_permissions"
   ON public.user_permissions FOR UPDATE
   TO authenticated
-  USING (current_user_hierarchy_level() >= 80)
-  WITH CHECK (current_user_hierarchy_level() >= 80);
+  USING (
+    current_user_hierarchy_level() >= 80
+    AND public.user_hierarchy_level(user_id) < current_user_hierarchy_level()
+  )
+  WITH CHECK (
+    current_user_hierarchy_level() >= 80
+    AND public.user_hierarchy_level(user_id) < current_user_hierarchy_level()
+  );
 
 CREATE POLICY "Admins can delete user_permissions"
   ON public.user_permissions FOR DELETE
   TO authenticated
-  USING (current_user_hierarchy_level() >= 80);
+  USING (
+    current_user_hierarchy_level() >= 80
+    AND public.user_hierarchy_level(user_id) < current_user_hierarchy_level()
+  );
 
 COMMIT;
