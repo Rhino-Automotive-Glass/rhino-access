@@ -83,7 +83,10 @@ export async function PUT(
     if (error) {
       return NextResponse.json(
         { error: error.message },
-        { status: error.code === '42501' ? 403 : 400 }
+        {
+          status:
+            error.code === '42501' ? 403 : error.code === 'P0002' ? 404 : 400,
+        }
       );
     }
 

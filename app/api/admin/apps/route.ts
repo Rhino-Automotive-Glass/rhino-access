@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission } from '@/app/lib/rbac/apiMiddleware';
 import { createAdminClient } from '@/app/lib/supabase/admin';
+import { getFallbackAppMetadata, sortApps } from '@/app/lib/rbac/permissions';
+import type { ConnectedApp } from '@/app/lib/rbac/types';
 
 /** GET — per-app summary: permission count + users with access */
 export async function GET(request: NextRequest) {
@@ -11,7 +13,12 @@ export async function GET(request: NextRequest) {
     const { supabase } = authResult;
     const adminClient = createAdminClient();
 
-    // Get all permissions grouped by app
+    const { data: appRows } = await supabase
+      .from('connected_apps')
+      .select('key, display_name, description, url, color, sort_order, is_active')
+      .order('sort_order')
+      .order('display_name');
+
     const { data: perms } = await supabase
       .from('permissions')
       .select('id, app');
@@ -29,11 +36,25 @@ export async function GET(request: NextRequest) {
       appMap.set(p.app, entry);
     }
 
-    const data = Array.from(appMap.entries()).map(([app, stats]) => ({
-      app,
-      total_permissions: stats.total_permissions,
-      users_with_access: totalUsers, // all users have at least viewer-level access to non-access apps
-    }));
+    const metadataMap = new Map<string, ConnectedApp>();
+    for (const app of (appRows ?? []) as ConnectedApp[]) {
+      metadataMap.set(app.key, app);
+    }
+
+    for (const appKey of appMap.keys()) {
+      if (!metadataMap.has(appKey)) {
+        metadataMap.set(appKey, getFallbackAppMetadata(appKey));
+      }
+    }
+
+    const data = sortApps(Array.from(metadataMap.values())).map((app) => {
+      const stats = appMap.get(app.key);
+      return {
+        ...app,
+        total_permissions: stats?.total_permissions ?? 0,
+        users_with_access: totalUsers,
+      };
+    });
 
     return NextResponse.json({ data });
   } catch (error) {

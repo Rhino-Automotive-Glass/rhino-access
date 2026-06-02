@@ -1,4 +1,4 @@
-import type { Permission } from './types';
+import type { ConnectedApp, Permission } from './types';
 
 /**
  * Check if a permission array contains a specific app+action+resource combo.
@@ -29,10 +29,54 @@ export const ROLE_COLORS: Record<string, string> = {
   viewer: 'bg-gray-100 text-gray-800',
 };
 
-/** App display config */
-export const APP_CONFIG = [
-  { key: 'access', name: 'Rhino Access', url: 'https://rhino-access.vercel.app', color: 'bg-blue-500' },
-  { key: 'origin', name: 'Rhino Origin', url: 'https://rhino-origin.vercel.app', color: 'bg-emerald-500' },
-  { key: 'code', name: 'Rhino Code', url: 'https://rhino-product-code-description.vercel.app', color: 'bg-violet-500' },
-  { key: 'stock', name: 'Rhino Stock', url: 'https://rhino-stock.vercel.app', color: 'bg-amber-500' },
-] as const;
+const FALLBACK_COLORS = [
+  'bg-blue-500',
+  'bg-emerald-500',
+  'bg-violet-500',
+  'bg-amber-500',
+  'bg-cyan-500',
+  'bg-rose-500',
+  'bg-lime-600',
+  'bg-slate-500',
+];
+
+function hashString(value: string) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+export function formatAppName(appKey: string) {
+  return appKey
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+export function getFallbackAppMetadata(appKey: string): ConnectedApp {
+  const color = FALLBACK_COLORS[hashString(appKey) % FALLBACK_COLORS.length];
+
+  return {
+    key: appKey,
+    display_name: formatAppName(appKey),
+    description: null,
+    url: null,
+    color,
+    sort_order: 999,
+    is_active: true,
+  };
+}
+
+export function getAppMetadata(apps: ConnectedApp[], appKey: string) {
+  return apps.find((app) => app.key === appKey) ?? getFallbackAppMetadata(appKey);
+}
+
+export function sortApps(apps: ConnectedApp[]) {
+  return [...apps].sort((a, b) => {
+    if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+    return a.display_name.localeCompare(b.display_name);
+  });
+}

@@ -6,7 +6,7 @@ import { useRole } from '@/app/contexts/RoleContext';
 import RoleBadge from '@/app/components/ui/RoleBadge';
 import Modal from '@/app/components/ui/Modal';
 import { toast } from '@/app/components/ui/Toast';
-import { APP_CONFIG } from '@/app/lib/rbac/permissions';
+import { getAppMetadata } from '@/app/lib/rbac/permissions';
 
 interface PermissionDef {
   id: string;
@@ -41,7 +41,7 @@ export default function UserDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id: userId } = use(params);
-  const { hasPermission, role: myRole, isLoading: authLoading } = useRole();
+  const { hasPermission, role: myRole, apps, isLoading: authLoading } = useRole();
   const router = useRouter();
 
   const [userDetail, setUserDetail] = useState<UserDetail | null>(null);
@@ -360,13 +360,13 @@ export default function UserDetailPage({
             </div>
 
             {Object.entries(permsByApp).map(([app, perms]) => {
-              const appInfo = APP_CONFIG.find((a) => a.key === app);
+              const appInfo = getAppMetadata(apps, app);
               return (
                 <div key={app} className="mb-6">
                   <div className="flex items-center gap-2 mb-2">
-                    {appInfo && <div className={`w-3 h-3 rounded-full ${appInfo.color}`} />}
+                    <div className={`w-3 h-3 rounded-full ${appInfo.color}`} />
                     <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">
-                      {appInfo?.name ?? app}
+                      {appInfo.display_name}
                     </h3>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

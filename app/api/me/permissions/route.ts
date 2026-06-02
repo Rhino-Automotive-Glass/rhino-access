@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/app/lib/rbac/apiMiddleware';
+import { getFallbackAppMetadata, sortApps } from '@/app/lib/rbac/permissions';
+import type { ConnectedApp, Permission } from '@/app/lib/rbac/types';
 
 export async function GET(request: NextRequest) {
   const authResult = await requireAuth(request);
@@ -21,6 +23,24 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  const { data: appRows } = await supabase
+    .from('connected_apps')
+    .select('key, display_name, description, url, color, sort_order, is_active')
+    .eq('is_active', true)
+    .order('sort_order')
+    .order('display_name');
+
+  const appMap = new Map<string, ConnectedApp>();
+  for (const app of (appRows ?? []) as ConnectedApp[]) {
+    appMap.set(app.key, app);
+  }
+
+  for (const permission of (perms ?? []) as Permission[]) {
+    if (!appMap.has(permission.app)) {
+      appMap.set(permission.app, getFallbackAppMetadata(permission.app));
+    }
+  }
+
   const rolesJoin = roleData?.roles as unknown as {
     id: string;
     name: string;
@@ -39,5 +59,6 @@ export async function GET(request: NextRequest) {
     user: { id: user.id, email: user.email },
     role,
     permissions: perms ?? [],
+    apps: sortApps(Array.from(appMap.values())),
   });
 }

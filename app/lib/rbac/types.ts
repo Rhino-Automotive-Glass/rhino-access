@@ -6,8 +6,6 @@ export type RoleName =
   | 'approver'
   | 'viewer';
 
-export type AppName = 'access' | 'origin' | 'code' | 'stock';
-
 export interface Role {
   id: string;
   name: RoleName;
@@ -19,11 +17,21 @@ export interface Role {
 
 export interface Permission {
   id?: string;
-  app: AppName;
+  app: string;
   action: string;
   resource: string | null;
   display_name?: string;
   description?: string | null;
+}
+
+export interface ConnectedApp {
+  key: string;
+  display_name: string;
+  description: string | null;
+  url: string | null;
+  color: string;
+  sort_order: number;
+  is_active: boolean;
 }
 
 export interface UserWithRole {

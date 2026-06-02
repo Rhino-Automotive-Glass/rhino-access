@@ -24,6 +24,15 @@ BEGIN
       USING ERRCODE = '22004';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1
+    FROM auth.users u
+    WHERE u.id = p_user_id
+  ) THEN
+    RAISE EXCEPTION 'Target user does not exist'
+      USING ERRCODE = 'P0002';
+  END IF;
+
   IF auth.role() IS DISTINCT FROM 'service_role' THEN
     IF actor_id IS NULL THEN
       RAISE EXCEPTION 'Authentication required'

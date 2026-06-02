@@ -3,10 +3,10 @@
 import { useRole } from '@/app/contexts/RoleContext';
 import Link from 'next/link';
 import RoleBadge from '@/app/components/ui/RoleBadge';
-import { APP_CONFIG } from '@/app/lib/rbac/permissions';
+import { getAppMetadata } from '@/app/lib/rbac/permissions';
 
 export default function DashboardPage() {
-  const { user, role, permissions, isLoading, hasPermission } = useRole();
+  const { user, role, permissions, apps, isLoading, hasPermission } = useRole();
 
   if (isLoading) {
     return (
@@ -62,11 +62,11 @@ export default function DashboardPage() {
             ) : (
               <div className="space-y-3">
                 {Object.entries(permsByApp).map(([app, perms]) => {
-                  const appInfo = APP_CONFIG.find((a) => a.key === app);
+                  const appInfo = getAppMetadata(apps, app);
                   return (
                     <div key={app}>
                       <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
-                        {appInfo?.name ?? app}
+                        {appInfo.display_name}
                       </span>
                       <div className="mt-1 flex flex-wrap gap-1">
                         {perms.map((p, i) => (

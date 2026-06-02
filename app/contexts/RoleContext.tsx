@@ -9,7 +9,7 @@ import {
   ReactNode,
 } from 'react';
 import { createClient } from '@/app/lib/supabase/client';
-import type { Role, Permission } from '@/app/lib/rbac/types';
+import type { ConnectedApp, Role, Permission } from '@/app/lib/rbac/types';
 
 interface UserInfo {
   id: string;
@@ -20,6 +20,7 @@ interface RoleContextType {
   user: UserInfo | null;
   role: Role | null;
   permissions: Permission[];
+  apps: ConnectedApp[];
   isLoading: boolean;
   hasPermission: (app: string, action: string, resource?: string) => boolean;
   refreshRole: () => Promise<void>;
@@ -29,6 +30,7 @@ const RoleContext = createContext<RoleContextType>({
   user: null,
   role: null,
   permissions: [],
+  apps: [],
   isLoading: true,
   hasPermission: () => false,
   refreshRole: async () => {},
@@ -38,6 +40,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [permissions, setPermissions] = useState<Permission[]>([]);
+  const [apps, setApps] = useState<ConnectedApp[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const supabase = createClient();
 
@@ -50,10 +53,12 @@ export function RoleProvider({ children }: { children: ReactNode }) {
         setUser(data.user);
         setRole(data.role);
         setPermissions(data.permissions ?? []);
+        setApps(data.apps ?? []);
       } else {
         setUser(null);
         setRole(null);
         setPermissions([]);
+        setApps([]);
       }
     } catch {
       // silent — dashboard layout will redirect to login if unauthenticated
@@ -89,6 +94,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setRole(null);
         setPermissions([]);
+        setApps([]);
         setIsLoading(false);
       }
     });
@@ -101,7 +107,15 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 
   return (
     <RoleContext.Provider
-      value={{ user, role, permissions, isLoading, hasPermission, refreshRole }}
+      value={{
+        user,
+        role,
+        permissions,
+        apps,
+        isLoading,
+        hasPermission,
+        refreshRole,
+      }}
     >
       {children}
     </RoleContext.Provider>

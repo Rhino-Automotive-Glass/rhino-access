@@ -3,10 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRole } from '@/app/contexts/RoleContext';
-import { APP_CONFIG } from '@/app/lib/rbac/permissions';
+import type { ConnectedApp } from '@/app/lib/rbac/types';
 
-interface AppSummary {
-  app: string;
+interface AppSummary extends ConnectedApp {
   total_permissions: number;
   users_with_access: number;
 }
@@ -51,38 +50,46 @@ export default function AppsPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {APP_CONFIG.map((app) => {
-              const summary = summaries.find((s) => s.app === app.key);
-              return (
-                <div key={app.key} className="card card-hover p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div
-                      className={`w-10 h-10 ${app.color} rounded-lg flex items-center justify-center`}
-                    >
-                      <span className="text-white text-sm font-bold">
-                        {app.name.split(' ')[1]?.[0] ?? app.name[0]}
-                      </span>
-                    </div>
-                    <h2 className="text-lg font-semibold text-slate-900">{app.name}</h2>
+            {summaries.map((app) => (
+              <div key={app.key} className="card card-hover p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div
+                    className={`w-10 h-10 ${app.color} rounded-lg flex items-center justify-center`}
+                  >
+                    <span className="text-white text-sm font-bold">
+                      {app.display_name.split(' ')[1]?.[0] ?? app.display_name[0]}
+                    </span>
                   </div>
-                  <p className="text-sm text-slate-500 mb-4 truncate">{app.url}</p>
-                  <div className="flex gap-6 text-sm">
-                    <div>
-                      <span className="text-2xl font-bold text-slate-900">
-                        {summary?.total_permissions ?? 0}
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-900">
+                      {app.display_name}
+                    </h2>
+                    {!app.is_active && (
+                      <span className="text-xs font-medium text-slate-500">
+                        Inactive
                       </span>
-                      <p className="text-slate-500">permissions</p>
-                    </div>
-                    <div>
-                      <span className="text-2xl font-bold text-slate-900">
-                        {summary?.users_with_access ?? 0}
-                      </span>
-                      <p className="text-slate-500">users</p>
-                    </div>
+                    )}
                   </div>
                 </div>
-              );
-            })}
+                <p className="text-sm text-slate-500 mb-4 truncate">
+                  {app.url ?? app.description ?? app.key}
+                </p>
+                <div className="flex gap-6 text-sm">
+                  <div>
+                    <span className="text-2xl font-bold text-slate-900">
+                      {app.total_permissions}
+                    </span>
+                    <p className="text-slate-500">permissions</p>
+                  </div>
+                  <div>
+                    <span className="text-2xl font-bold text-slate-900">
+                      {app.users_with_access}
+                    </span>
+                    <p className="text-slate-500">users</p>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
