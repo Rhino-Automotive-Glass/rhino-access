@@ -55,25 +55,48 @@ export default function UserDetailPage({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  const canManageUsers = hasPermission('access', 'manage_users');
+  const canManagePermissions = hasPermission('access', 'manage_permissions');
+
   useEffect(() => {
-    if (!authLoading && !hasPermission('access', 'manage_users')) {
+    if (!authLoading && !canManageUsers) {
       router.push('/');
     }
-  }, [authLoading, hasPermission, router]);
+  }, [authLoading, canManageUsers, router]);
 
   useEffect(() => {
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+    if (authLoading || !canManageUsers) return;
 
-  const loadData = async () => {
+    loadData(canManagePermissions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, authLoading, canManageUsers, canManagePermissions]);
+
+  const getErrorMessage = async (res: Response, fallback: string) => {
+    try {
+      const data = await res.json();
+      return typeof data.error === 'string' ? data.error : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const loadData = async (includePermissionOverrides: boolean) => {
     setIsLoading(true);
     try {
-      const [userRes, rolesRes, permsRes, overridesRes] = await Promise.all([
+      const baseRequests = [
         fetch(`/api/admin/users/${userId}`),
         fetch('/api/admin/roles'),
-        fetch('/api/admin/permissions'),
-        fetch(`/api/admin/users/${userId}/permissions`),
+      ] as const;
+      const overrideRequests = includePermissionOverrides
+        ? [
+            fetch('/api/admin/permissions'),
+            fetch(`/api/admin/users/${userId}/permissions`),
+          ] as const
+        : [];
+
+      const [userRes, rolesRes, permsRes, overridesRes] = await Promise.all([
+        ...baseRequests,
+        ...overrideRequests,
       ]);
 
       if (userRes.ok) {
@@ -81,19 +104,31 @@ export default function UserDetailPage({
         setUserDetail(userData);
         setSelectedRoleId(userData.role_id);
         setRolePermIds(new Set(userData.role_permission_ids));
+      } else {
+        toast('error', await getErrorMessage(userRes, 'Failed to load user'));
       }
 
       if (rolesRes.ok) {
         const data = await rolesRes.json();
         setRoles(data.data);
+      } else {
+        toast('error', await getErrorMessage(rolesRes, 'Failed to load roles'));
       }
 
-      if (permsRes.ok) {
+      if (!includePermissionOverrides) {
+        setAllPermissions([]);
+        setUserOverrides(new Map());
+      } else if (permsRes?.ok) {
         const data = await permsRes.json();
         setAllPermissions(data.data);
+      } else if (permsRes) {
+        toast(
+          'error',
+          await getErrorMessage(permsRes, 'Failed to load permission definitions')
+        );
       }
 
-      if (overridesRes.ok) {
+      if (overridesRes?.ok) {
         const data = await overridesRes.json();
         const map = new Map<string, boolean>();
         (data.data ?? []).forEach(
@@ -102,6 +137,11 @@ export default function UserDetailPage({
           }
         );
         setUserOverrides(map);
+      } else if (overridesRes) {
+        toast(
+          'error',
+          await getErrorMessage(overridesRes, 'Failed to load permission overrides')
+        );
       }
     } catch (err) {
       console.error('Error loading user data:', err);
@@ -138,6 +178,8 @@ export default function UserDetailPage({
   };
 
   const toggleOverride = (permId: string) => {
+    if (!canManagePermissions) return;
+
     const newOverrides = new Map(userOverrides);
     const fromRole = rolePermIds.has(permId);
     const current = newOverrides.get(permId);
@@ -151,26 +193,40 @@ export default function UserDetailPage({
   };
 
   const saveOverrides = async () => {
-    setSaving(true);
-    const grants: string[] = [];
-    const revokes: string[] = [];
-    userOverrides.forEach((granted, permId) => {
-      if (granted) grants.push(permId);
-      else revokes.push(permId);
-    });
-
-    const res = await fetch(`/api/admin/users/${userId}/permissions`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ grants, revokes }),
-    });
-
-    if (res.ok) {
-      toast('success', 'Permission overrides saved');
-    } else {
-      toast('error', 'Failed to save permission overrides');
+    if (!canManagePermissions) {
+      toast('error', 'You do not have permission to manage user overrides');
+      return;
     }
-    setSaving(false);
+
+    setSaving(true);
+    try {
+      const grants: string[] = [];
+      const revokes: string[] = [];
+      userOverrides.forEach((granted, permId) => {
+        if (granted) grants.push(permId);
+        else revokes.push(permId);
+      });
+
+      const res = await fetch(`/api/admin/users/${userId}/permissions`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grants, revokes }),
+      });
+
+      if (res.ok) {
+        toast('success', 'Permission overrides saved');
+      } else {
+        toast(
+          'error',
+          await getErrorMessage(res, 'Failed to save permission overrides')
+        );
+      }
+    } catch (err) {
+      console.error('Error saving permission overrides:', err);
+      toast('error', 'Failed to save permission overrides');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -288,80 +344,92 @@ export default function UserDetailPage({
           </div>
         </div>
 
-        {/* Permission Matrix */}
-        <div className="card p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800">Permissions</h2>
-              <p className="text-sm text-slate-500 mt-1">
-                Blue = from role. Green/Red = user-specific override.
-              </p>
-            </div>
-            <button onClick={saveOverrides} disabled={saving} className="btn btn-primary btn-sm">
-              {saving ? 'Saving...' : 'Save Overrides'}
-            </button>
-          </div>
-
-          {Object.entries(permsByApp).map(([app, perms]) => {
-            const appInfo = APP_CONFIG.find((a) => a.key === app);
-            return (
-              <div key={app} className="mb-6">
-                <div className="flex items-center gap-2 mb-2">
-                  {appInfo && <div className={`w-3 h-3 rounded-full ${appInfo.color}`} />}
-                  <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">
-                    {appInfo?.name ?? app}
-                  </h3>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {perms.map((p) => {
-                    const fromRole = rolePermIds.has(p.id);
-                    const override = userOverrides.get(p.id);
-                    const effective = override !== undefined ? override : fromRole;
-
-                    let borderClass = 'border-slate-200';
-                    let bgClass = '';
-                    if (override !== undefined) {
-                      borderClass = override ? 'border-green-300' : 'border-red-300';
-                      bgClass = override ? 'bg-green-50' : 'bg-red-50';
-                    } else if (fromRole) {
-                      borderClass = 'border-blue-200';
-                      bgClass = 'bg-blue-50';
-                    }
-
-                    return (
-                      <label
-                        key={p.id}
-                        className={`flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${borderClass} ${bgClass}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={effective}
-                          onChange={() => toggleOverride(p.id)}
-                          className="h-4 w-4 rounded"
-                        />
-                        <div className="min-w-0">
-                          <span className="text-sm font-medium text-slate-700">
-                            {p.display_name}
-                          </span>
-                          {override !== undefined && (
-                            <span
-                              className={`ml-2 text-xs ${override ? 'text-green-600' : 'text-red-600'}`}
-                            >
-                              (override)
-                            </span>
-                          )}
-                          {p.description && (
-                            <p className="text-xs text-slate-400 truncate">{p.description}</p>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
+        {canManagePermissions ? (
+          /* Permission Matrix */
+          <div className="card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-800">Permissions</h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  Blue = from role. Green/Red = user-specific override.
+                </p>
               </div>
-            );
-          })}
-        </div>
+              <button onClick={saveOverrides} disabled={saving} className="btn btn-primary btn-sm">
+                {saving ? 'Saving...' : 'Save Overrides'}
+              </button>
+            </div>
+
+            {Object.entries(permsByApp).map(([app, perms]) => {
+              const appInfo = APP_CONFIG.find((a) => a.key === app);
+              return (
+                <div key={app} className="mb-6">
+                  <div className="flex items-center gap-2 mb-2">
+                    {appInfo && <div className={`w-3 h-3 rounded-full ${appInfo.color}`} />}
+                    <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">
+                      {appInfo?.name ?? app}
+                    </h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {perms.map((p) => {
+                      const fromRole = rolePermIds.has(p.id);
+                      const override = userOverrides.get(p.id);
+                      const effective = override !== undefined ? override : fromRole;
+
+                      let borderClass = 'border-slate-200';
+                      let bgClass = '';
+                      if (override !== undefined) {
+                        borderClass = override ? 'border-green-300' : 'border-red-300';
+                        bgClass = override ? 'bg-green-50' : 'bg-red-50';
+                      } else if (fromRole) {
+                        borderClass = 'border-blue-200';
+                        bgClass = 'bg-blue-50';
+                      }
+
+                      return (
+                        <label
+                          key={p.id}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${borderClass} ${bgClass}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={effective}
+                            onChange={() => toggleOverride(p.id)}
+                            className="h-4 w-4 rounded"
+                          />
+                          <div className="min-w-0">
+                            <span className="text-sm font-medium text-slate-700">
+                              {p.display_name}
+                            </span>
+                            {override !== undefined && (
+                              <span
+                                className={`ml-2 text-xs ${override ? 'text-green-600' : 'text-red-600'}`}
+                              >
+                                (override)
+                              </span>
+                            )}
+                            {p.description && (
+                              <p className="text-xs text-slate-400 truncate">{p.description}</p>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="card p-6">
+            <h2 className="text-lg font-semibold text-slate-800">
+              Permission Overrides
+            </h2>
+            <p className="text-sm text-slate-500 mt-1">
+              You can manage this user&apos;s role, but viewing or editing user-specific
+              permission overrides requires Manage Permissions access.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Delete Confirmation Modal */}
