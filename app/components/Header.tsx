@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useTransition } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useRole } from '../contexts/RoleContext';
@@ -17,6 +17,7 @@ export default function Header({ onSignOut }: { onSignOut: () => Promise<void> }
   const { user, role, hasPermission } = useRole();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isSigningOut, startSignOutTransition] = useTransition();
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -113,11 +114,14 @@ export default function Header({ onSignOut }: { onSignOut: () => Promise<void> }
                   <button
                     onClick={() => {
                       setMenuOpen(false);
-                      onSignOut();
+                      startSignOutTransition(() => {
+                        void onSignOut();
+                      });
                     }}
+                    disabled={isSigningOut}
                     className="block w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 transition-colors"
                   >
-                    Sign Out
+                    {isSigningOut ? 'Signing Out...' : 'Sign Out'}
                   </button>
                 </div>
               )}

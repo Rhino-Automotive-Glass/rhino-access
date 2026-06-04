@@ -6,7 +6,17 @@ import RoleBadge from '@/app/components/ui/RoleBadge';
 import { getAppMetadata } from '@/app/lib/rbac/permissions';
 
 export default function DashboardPage() {
-  const { user, role, permissions, apps, isLoading, hasPermission } = useRole();
+  const {
+    user,
+    role,
+    permissions,
+    apps,
+    authError,
+    isLoading,
+    hasPermission,
+    refreshRole,
+    clearSession,
+  } = useRole();
 
   if (isLoading) {
     return (
@@ -16,6 +26,35 @@ export default function DashboardPage() {
           <p className="text-slate-700 font-medium">Loading...</p>
         </div>
       </div>
+    );
+  }
+
+  if (!user || authError) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-slate-50 px-4">
+        <div className="bg-white rounded-lg shadow-lg border border-slate-200 p-8 max-w-md w-full">
+          <h1 className="text-xl font-semibold text-slate-900">
+            Session needs attention
+          </h1>
+          <p className="text-sm text-slate-600 mt-2">
+            We could not load your account permissions. Try again, or sign out
+            and return to the login page.
+          </p>
+          {authError && (
+            <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2 mt-4">
+              {authError}
+            </p>
+          )}
+          <div className="flex gap-3 mt-6">
+            <button type="button" onClick={refreshRole} className="btn btn-secondary btn-md">
+              Retry
+            </button>
+            <button type="button" onClick={clearSession} className="btn btn-primary btn-md">
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </main>
     );
   }
 

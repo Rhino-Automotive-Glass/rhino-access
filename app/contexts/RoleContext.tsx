@@ -6,6 +6,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   ReactNode,
 } from 'react';
 import { createClient } from '@/app/lib/supabase/client';
@@ -21,9 +22,11 @@ interface RoleContextType {
   role: Role | null;
   permissions: Permission[];
   apps: ConnectedApp[];
+  authError: string | null;
   isLoading: boolean;
   hasPermission: (app: string, action: string, resource?: string) => boolean;
   refreshRole: () => Promise<void>;
+  clearSession: () => Promise<void>;
 }
 
 const RoleContext = createContext<RoleContextType>({
@@ -31,9 +34,11 @@ const RoleContext = createContext<RoleContextType>({
   role: null,
   permissions: [],
   apps: [],
+  authError: null,
   isLoading: true,
   hasPermission: () => false,
   refreshRole: async () => {},
+  clearSession: async () => {},
 });
 
 export function RoleProvider({ children }: { children: ReactNode }) {
@@ -41,31 +46,67 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<Role | null>(null);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [apps, setApps] = useState<ConnectedApp[]>([]);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+
+  const resetAuthState = useCallback((message: string | null = null) => {
+    setUser(null);
+    setRole(null);
+    setPermissions([]);
+    setApps([]);
+    setAuthError(message);
+  }, []);
+
+  const clearSession = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      await supabase.auth.signOut();
+      await fetch('/api/auth/signout', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+    } finally {
+      resetAuthState(null);
+      setIsLoading(false);
+      window.location.assign('/login');
+    }
+  }, [resetAuthState, supabase]);
 
   const refreshRole = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/me/permissions');
+      const res = await fetch('/api/me/permissions', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      });
       if (res.ok) {
         const data = await res.json();
         setUser(data.user);
         setRole(data.role);
         setPermissions(data.permissions ?? []);
         setApps(data.apps ?? []);
-      } else {
-        setUser(null);
-        setRole(null);
-        setPermissions([]);
-        setApps([]);
+        setAuthError(null);
+        return;
       }
+
+      if (res.status === 401) {
+        await clearSession();
+        return;
+      }
+
+      const payload = await res.json().catch(() => null);
+      resetAuthState(
+        typeof payload?.error === 'string'
+          ? payload.error
+          : 'Unable to load your account permissions.'
+      );
     } catch {
-      // silent — dashboard layout will redirect to login if unauthenticated
+      resetAuthState('Unable to reach the authentication service.');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [clearSession, resetAuthState]);
 
   const hasPermission = useCallback(
     (app: string, action: string, resource?: string): boolean => {
@@ -91,10 +132,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       if (session?.user) {
         refreshRole();
       } else {
-        setUser(null);
-        setRole(null);
-        setPermissions([]);
-        setApps([]);
+        resetAuthState(null);
         setIsLoading(false);
       }
     });
@@ -102,8 +140,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     return () => {
       subscription.unsubscribe();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshRole]);
+  }, [refreshRole, resetAuthState, supabase]);
 
   return (
     <RoleContext.Provider
@@ -112,9 +149,11 @@ export function RoleProvider({ children }: { children: ReactNode }) {
         role,
         permissions,
         apps,
+        authError,
         isLoading,
         hasPermission,
         refreshRole,
+        clearSession,
       }}
     >
       {children}
