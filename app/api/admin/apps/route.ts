@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission } from '@/app/lib/rbac/apiMiddleware';
-import { createAdminClient } from '@/app/lib/supabase/admin';
 import { getFallbackAppMetadata, sortApps } from '@/app/lib/rbac/permissions';
 import type { ConnectedApp } from '@/app/lib/rbac/types';
+
+interface AppAccessCount {
+  app: string;
+  users_with_access: number;
+}
 
 /** GET — per-app summary: permission count + users with access */
 export async function GET(request: NextRequest) {
@@ -11,7 +15,6 @@ export async function GET(request: NextRequest) {
 
   try {
     const { supabase } = authResult;
-    const adminClient = createAdminClient();
 
     const { data: appRows } = await supabase
       .from('connected_apps')
@@ -23,10 +26,16 @@ export async function GET(request: NextRequest) {
       .from('permissions')
       .select('id, app');
 
-    // Get all users count
-    const { data: usersData } = await adminClient.auth.admin.listUsers();
-    const totalUsers =
-      usersData?.users?.filter((user) => !user.deleted_at).length ?? 0;
+    const { data: accessCounts, error: accessCountsError } = await supabase.rpc(
+      'get_app_access_counts'
+    );
+
+    if (accessCountsError) {
+      return NextResponse.json(
+        { error: accessCountsError.message },
+        { status: accessCountsError.code === '42501' ? 403 : 500 }
+      );
+    }
 
     // Group permission counts by app
     const appMap = new Map<string, { total_permissions: number }>();
@@ -47,12 +56,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const accessCountMap = new Map(
+      ((accessCounts ?? []) as AppAccessCount[]).map((row) => [
+        row.app,
+        row.users_with_access,
+      ])
+    );
+
     const data = sortApps(Array.from(metadataMap.values())).map((app) => {
       const stats = appMap.get(app.key);
       return {
         ...app,
         total_permissions: stats?.total_permissions ?? 0,
-        users_with_access: totalUsers,
+        users_with_access: accessCountMap.get(app.key) ?? 0,
       };
     });
 
