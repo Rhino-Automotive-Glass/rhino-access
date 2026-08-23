@@ -203,9 +203,17 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 - `product_codes` — admin+ can create/update/delete; QA+ (level 50) can toggle verified
 
 ### Migration
+
+> **Do NOT run `supabase db push` in this repo.** Migrations here are applied by hand in the Supabase SQL editor, so the remote `schema_migrations` table has no record of `001`–`009`. The CLI therefore considers all of them pending, and a push would re-run `001` against the live database — `CREATE TABLE public.roles` on an existing table and `ALTER TABLE public.user_roles DROP COLUMN role` on the live column. The CLI is linked (`supabase/config.toml` exists) purely for read-only inspection such as `supabase migration list`.
+>
+> The remote history contains ~8 timestamped migrations dated 2026-05-14 → 2026-05-27 that do not correspond to any file here. They predate `002`–`008` (written 2026-06-02), so they belong to one of the sibling apps sharing this Supabase project. Reconciling the two histories — via `supabase migration repair --status applied` for `001`–`009` — would write this repo's version numbers into a `schema_migrations` table another repo also manages. Coordinate across repos before doing that; until then, apply migrations by hand.
+
+**Applying a migration:** open the SQL editor for the project, paste the whole file, run it. Each file wraps itself in `BEGIN`/`COMMIT`, so it fully applies or fully rolls back.
+
 - `supabase/migrations/001_expand_rbac.sql` — Full migration file. Run in Supabase SQL editor.
 - The migration handles: creating new tables, seeding roles/permissions/role_permissions, migrating `user_roles` from varchar `role` to FK `role_id`, dropping and recreating dependent RLS policies on `audit_logs` and `product_codes`, adding RPC functions, triggers, and RLS policies.
-- `002`–`009` are follow-up migrations, each idempotent and safe to re-run. Apply them in order after `001`. Most recent: `009_align_role_permissions_read_with_manage_users.sql` — makes the `role_permissions` read policy accept `access.manage_users`, matching what the API routes actually gate on.
+- `001` is **run-once and not idempotent** — bare `CREATE TABLE`, and it drops `user_roles.role`. Only run it against a database that has never had it applied.
+- `002`–`009` are follow-up migrations, each idempotent (`CREATE OR REPLACE`, `DROP POLICY IF EXISTS`, `ON CONFLICT`) and safe to re-run. Apply them in order after `001`. Most recent: `009_align_role_permissions_read_with_manage_users.sql` — makes the `role_permissions` read policy accept `access.manage_users`, matching what the API routes actually gate on.
 - After running the migration, promote yourself to super_admin:
   ```sql
   UPDATE public.user_roles
