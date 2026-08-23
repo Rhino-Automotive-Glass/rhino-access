@@ -54,7 +54,28 @@ export async function requirePermission(
     p_resource: resource ?? null,
   });
 
-  if (error || !data) {
+  // A failed check is not the same as a denied one. The RPC raises 42501 to mean
+  // "not allowed"; anything else is a real failure and must not be reported to
+  // the caller as a permission problem.
+  if (error) {
+    if (error.code === '42501') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    console.error('Permission check failed', {
+      app,
+      action,
+      resource: resource ?? null,
+      code: error.code,
+      error: error.message,
+    });
+    return NextResponse.json(
+      { error: 'Could not verify your permissions. Please try again.' },
+      { status: 500 }
+    );
+  }
+
+  if (!data) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

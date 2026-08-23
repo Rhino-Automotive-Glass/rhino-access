@@ -4,14 +4,17 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRole } from '@/app/contexts/RoleContext';
 
+// Mirrors the audit_logs columns written by log_role_change() in migration 001.
+// These are nullable in the table, so the filter below must not assume strings.
 interface AuditEntry {
   id: string;
   action: string;
   resource_type: string;
-  resource_id: string;
+  resource_id: string | null;
   old_data: Record<string, unknown> | null;
   new_data: Record<string, unknown> | null;
-  performed_by: string | null;
+  user_id: string | null;
+  user_email: string | null;
   created_at: string;
 }
 
@@ -47,12 +50,13 @@ export default function AuditPage() {
     }
   };
 
-  const filtered = logs.filter(
-    (l) =>
-      !filter ||
-      l.action.includes(filter) ||
-      l.resource_type.includes(filter) ||
-      l.resource_id.includes(filter)
+  const needle = filter.trim().toLowerCase();
+  const filtered = logs.filter((l) =>
+    !needle
+      ? true
+      : [l.action, l.resource_type, l.resource_id, l.user_email].some((field) =>
+          field?.toLowerCase().includes(needle)
+        )
   );
 
   const actionColors: Record<string, string> = {
@@ -80,7 +84,7 @@ export default function AuditPage() {
           <div className="mb-4">
             <input
               type="text"
-              placeholder="Filter by action, resource type, or ID..."
+              placeholder="Filter by action, resource type, ID, or user..."
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               className="input-base max-w-sm"
@@ -117,6 +121,9 @@ export default function AuditPage() {
                           {entry.resource_id.slice(0, 8)}...
                         </span>
                       )}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      by {entry.user_email ?? 'system'}
                     </p>
                     {entry.new_data && (
                       <pre className="mt-1 text-xs text-slate-500 overflow-hidden text-ellipsis max-w-full">

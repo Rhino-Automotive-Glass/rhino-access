@@ -40,16 +40,21 @@ export default function UsersPage() {
   const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const myLevel = myRole?.hierarchy_level ?? null;
+
   useEffect(() => {
     if (!authLoading && !hasPermission('access', 'manage_users')) {
       router.push('/');
     }
   }, [authLoading, hasPermission, router]);
 
+  // Wait for the role context: loadData picks the default invite role by
+  // comparing against myRole.hierarchy_level, which is null until it resolves.
   useEffect(() => {
+    if (authLoading || myLevel === null) return;
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authLoading, myLevel]);
 
   const loadData = async () => {
     setIsLoading(true);

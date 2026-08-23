@@ -10,6 +10,7 @@ import {
   ReactNode,
 } from 'react';
 import { createClient } from '@/app/lib/supabase/client';
+import { hasPermission as checkPermission } from '@/app/lib/rbac/permissions';
 import type { ConnectedApp, Role, Permission } from '@/app/lib/rbac/types';
 
 interface UserInfo {
@@ -108,19 +109,14 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     }
   }, [clearSession, resetAuthState]);
 
+  // No super_admin short-circuit here. The server's user_has_permission() has no
+  // such bypass, so granting one client-side would show controls that the API
+  // then rejects. super_admin already resolves every permission through the
+  // role_permissions seed; this stays a pure read of what the server returned.
   const hasPermission = useCallback(
-    (app: string, action: string, resource?: string): boolean => {
-      if (role?.name === 'super_admin') return true;
-      const requestedResource = resource ?? null;
-
-      return permissions.some(
-        (p) =>
-          p.app === app &&
-          p.action === action &&
-          p.resource === requestedResource
-      );
-    },
-    [role, permissions]
+    (app: string, action: string, resource?: string): boolean =>
+      checkPermission(permissions, app, action, resource),
+    [permissions]
   );
 
   useEffect(() => {
@@ -128,7 +124,12 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      // INITIAL_SESSION fires on subscribe and just replays the session the
+      // refreshRole() above already covers. TOKEN_REFRESHED is the same session
+      // with a newer access token, so the resolved permissions are unchanged.
+      if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') return;
+
       if (session?.user) {
         refreshRole();
       } else {

@@ -114,16 +114,41 @@ export async function DELETE(
 
     const adminClient = createAdminClient();
 
-    // Clean up: user_permissions and user_roles will cascade from auth.users FK,
-    // but delete explicitly for audit clarity
-    await supabase.from('user_permissions').delete().eq('user_id', userId);
-    await supabase.from('user_roles').delete().eq('user_id', userId);
+    // A soft delete leaves the auth.users row in place, so the FK cascades never
+    // fire — RBAC rows have to be removed explicitly. Do this before revoking
+    // sign-in so a failure here leaves the user fully intact and retryable.
+    const { error: permissionsError } = await supabase
+      .from('user_permissions')
+      .delete()
+      .eq('user_id', userId);
 
-    // Delete the auth user (this is permanent)
-    const { error } = await adminClient.auth.admin.deleteUser(userId);
+    if (permissionsError) {
+      logDeleteStepError('removing permission overrides', userId, permissionsError);
+      return NextResponse.json(
+        { error: 'Failed to remove the user’s permission overrides' },
+        { status: 400 }
+      );
+    }
+
+    const { error: rolesError } = await supabase
+      .from('user_roles')
+      .delete()
+      .eq('user_id', userId);
+
+    if (rolesError) {
+      logDeleteStepError('removing role assignment', userId, rolesError);
+      return NextResponse.json(
+        { error: 'Failed to remove the user’s role assignment' },
+        { status: 400 }
+      );
+    }
+
+    // Soft delete: revokes sign-in and hides the user from listings via
+    // deleted_at, while preserving audit history and audit_logs references.
+    const { error } = await adminClient.auth.admin.deleteUser(userId, true);
 
     if (error) {
-      logDeleteStepError('deleting auth user', userId, error);
+      logDeleteStepError('deactivating auth user', userId, error);
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 

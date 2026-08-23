@@ -76,14 +76,35 @@ export async function POST(request: NextRequest) {
       );
       if (hierarchyResult instanceof NextResponse) return hierarchyResult;
 
-      await supabase.from('user_roles').upsert(
-        {
-          user_id: data.user.id,
-          role_id,
-          assigned_by: adminUser.id,
-        },
-        { onConflict: 'user_id' }
-      );
+      const { error: roleAssignError } = await supabase
+        .from('user_roles')
+        .upsert(
+          {
+            user_id: data.user.id,
+            role_id,
+            assigned_by: adminUser.id,
+          },
+          { onConflict: 'user_id' }
+        );
+
+      // The invite email is already sent and the auth user exists. If the role
+      // write fails the on_auth_user_created trigger has left them as a viewer,
+      // so surface it instead of reporting a successful invite.
+      if (roleAssignError) {
+        console.error('Invite succeeded but role assignment failed', {
+          userId: data.user.id,
+          roleId: role_id,
+          error: roleAssignError.message,
+        });
+        return NextResponse.json(
+          {
+            error:
+              'Invitation was sent, but the requested role could not be assigned. The user currently has the default Viewer role — set their role from the user detail page.',
+            user_id: data.user.id,
+          },
+          { status: 500 }
+        );
+      }
     }
 
     return NextResponse.json({

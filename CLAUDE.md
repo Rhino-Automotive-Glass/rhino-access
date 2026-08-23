@@ -162,8 +162,9 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 
 ### User Deletion
 
-- `DELETE /api/admin/users/[userId]` permanently removes a user
-- Cleans up `user_permissions` and `user_roles` before deleting from `auth.users`
+- `DELETE /api/admin/users/[userId]` soft-deletes a user (`deleteUser(id, true)`) — sign-in is revoked and `deleted_at` is set, but the `auth.users` row and audit history survive
+- Deletes `user_permissions` and `user_roles` first. This is required, not just tidiness: a soft delete leaves the `auth.users` row in place, so the `ON DELETE CASCADE` FKs never fire. Each step is error-checked, and cleanup runs before the soft delete so a failure leaves the user intact and the call retryable
+- Soft-deleted users are filtered out of listings by the `deleted_at` checks in `/api/admin/users` and `/api/admin/users/[userId]`, and by `get_app_access_counts()`
 - Protected by hierarchy check — cannot delete users at or above your own level
 - Cannot delete yourself
 
@@ -195,7 +196,7 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 
 ### RLS Policy Summary
 - `roles` / `permissions` — all authenticated can read; only super_admin (level 100) can modify
-- `role_permissions` — admin+ (level 80) can read; only super_admin can modify
+- `role_permissions` — admin+ (level 80) **or** anyone holding `access.manage_users` can read; only super_admin can modify. The `manage_users` clause matters because the API routes gate on that permission, not on level — without it, a sub-80 user granted `manage_users` via override gets a silently empty result set instead of an error (see migration 009)
 - `user_roles` — users can read their own; admin+ can read all; admin+ can insert/update with hierarchy check
 - `user_permissions` — users can read their own; admin+ can read/manage all
 - `audit_logs` — admin+ can read (policy recreated by migration to use new schema)
@@ -204,6 +205,7 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 ### Migration
 - `supabase/migrations/001_expand_rbac.sql` — Full migration file. Run in Supabase SQL editor.
 - The migration handles: creating new tables, seeding roles/permissions/role_permissions, migrating `user_roles` from varchar `role` to FK `role_id`, dropping and recreating dependent RLS policies on `audit_logs` and `product_codes`, adding RPC functions, triggers, and RLS policies.
+- `002`–`009` are follow-up migrations, each idempotent and safe to re-run. Apply them in order after `001`. Most recent: `009_align_role_permissions_read_with_manage_users.sql` — makes the `role_permissions` read policy accept `access.manage_users`, matching what the API routes actually gate on.
 - After running the migration, promote yourself to super_admin:
   ```sql
   UPDATE public.user_roles
@@ -234,7 +236,7 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 | GET | `/api/me/permissions` | `requireAuth` | Current user's role + resolved permissions |
 | GET | `/api/admin/users` | `manage_users` | List all users with roles |
 | GET | `/api/admin/users/[userId]` | `manage_users` | User detail with role permission IDs |
-| DELETE | `/api/admin/users/[userId]` | `requireMinLevel(80)` + hierarchy check | Permanently remove user |
+| DELETE | `/api/admin/users/[userId]` | `requireMinLevel(80)` + hierarchy check | Soft-delete user (revoke sign-in, keep audit history) |
 | PUT | `/api/admin/users/[userId]/role` | `manage_users` + hierarchy check | Update user's role |
 | GET/PUT | `/api/admin/users/[userId]/permissions` | `manage_permissions` | User-specific permission overrides |
 | POST | `/api/admin/users/invite` | `manage_users` + hierarchy check | Invite user by email with role |

@@ -11,6 +11,7 @@ interface ToastMessage {
 }
 
 let addToastFn: ((type: ToastType, message: string) => void) | null = null;
+let nextToastId = 0;
 
 /** Call from anywhere to show a toast */
 export function toast(type: ToastType, message: string) {
@@ -21,7 +22,9 @@ export default function ToastContainer() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const addToast = useCallback((type: ToastType, message: string) => {
-    const id = Date.now();
+    // Not Date.now(): two toasts raised in the same millisecond would collide,
+    // duplicating React keys and letting the first timeout drop both.
+    const id = nextToastId++;
     setToasts((prev) => [...prev, { id, type, message }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
