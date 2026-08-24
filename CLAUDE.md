@@ -234,7 +234,7 @@ Still not captured: `ip_address` and `user_agent` exist on `audit_logs` and are 
 - `supabase/migrations/001_expand_rbac.sql` — Full migration file. Run in Supabase SQL editor.
 - The migration handles: creating new tables, seeding roles/permissions/role_permissions, migrating `user_roles` from varchar `role` to FK `role_id`, dropping and recreating dependent RLS policies on `audit_logs` and `product_codes`, adding RPC functions, triggers, and RLS policies.
 - `001` is **run-once and not idempotent** — bare `CREATE TABLE`, and it drops `user_roles.role`. Only run it against a database that has never had it applied.
-- `002`–`010` are follow-up migrations, each idempotent (`CREATE OR REPLACE`, `DROP POLICY IF EXISTS`, `ON CONFLICT`) and safe to re-run. Apply them in order after `001`. Most recent: `010_audit_removals_and_overrides.sql` — adds DELETE auditing on `user_roles`, full auditing on `user_permissions`, and the `log_audit_event()` RPC. Before it, user removal and permission-override changes were entirely unrecorded.
+- `002`–`011` are follow-up migrations, each idempotent (`CREATE OR REPLACE`, `DROP POLICY IF EXISTS`, `ON CONFLICT`) and safe to re-run. Apply them in order after `001`. Most recent: `011_paginate_and_search_audit_logs.sql` — adds the `search_audit_logs(query, limit, offset)` RPC plus a `created_at DESC` index, moving audit search and paging into the database.
 - After running the migration, promote yourself to super_admin:
   ```sql
   UPDATE public.user_roles
@@ -272,7 +272,7 @@ Still not captured: `ip_address` and `user_agent` exist on `audit_logs` and are 
 | GET | `/api/admin/roles/[roleId]/permissions` | `manage_users` | Role's default permission IDs |
 | GET | `/api/admin/permissions` | `requireAuth` | List all permission definitions |
 | GET | `/api/admin/apps` | `manage_users` | Per-app summary stats |
-| GET | `/api/admin/audit` | `view_audit_logs` | Audit log entries |
+| GET | `/api/admin/audit` | `view_audit_logs` | Audit log entries. Accepts `q`, `limit` (max 200), `offset`; returns `{data, total, limit, offset, hasMore}`. Search and paging run in SQL via `search_audit_logs()` — filtering in the browser would only search the loaded page and report "no entries found" for records it had not fetched |
 
 ---
 
