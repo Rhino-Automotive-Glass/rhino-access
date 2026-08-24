@@ -111,6 +111,23 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
+
+      // The role trigger records the role row, but not who was invited or at
+      // what address. Best effort: a failed audit write must not fail an invite
+      // that already succeeded, so log it and carry on.
+      const { error: auditError } = await supabase.rpc('log_audit_event', {
+        p_action: 'invite',
+        p_resource_type: 'user',
+        p_resource_id: data.user.id,
+        p_new_data: { email, role_id, invited_by: adminUser.id },
+      });
+
+      if (auditError) {
+        console.error('Invite succeeded but audit logging failed', {
+          userId: data.user.id,
+          error: auditError.message,
+        });
+      }
     }
 
     return NextResponse.json({

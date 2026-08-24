@@ -1,8 +1,10 @@
+// Access is invite-only: there is no public signup route. Accounts are created
+// by an admin via POST /api/admin/users/invite, and "Allow new users to sign up"
+// is disabled in Supabase Auth so auth.signUp() is rejected at the source.
 export const AUTH_ROUTES = {
-  public: ['/login', '/signup'],
+  public: ['/login'],
   protected: ['/'],
   login: '/login',
-  signup: '/signup',
   dashboard: '/',
 } as const
 

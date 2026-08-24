@@ -63,6 +63,7 @@ export default function AuditPage() {
     create: 'bg-green-100 text-green-800',
     update: 'bg-blue-100 text-blue-800',
     delete: 'bg-red-100 text-red-800',
+    invite: 'bg-purple-100 text-purple-800',
   };
 
   if (authLoading || !hasPermission('access', 'view_audit_logs')) return null;

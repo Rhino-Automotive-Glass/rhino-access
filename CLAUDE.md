@@ -46,6 +46,7 @@ Three Supabase client variants used depending on context:
 - `actions.ts` — Server actions (`'use server'`) for `signIn`, `signUp`, `signOut`
 - `constants.ts` — Route paths and error message constants
 - `siteUrl.ts` — `getSiteUrl()`, the single source for the base URL used in auth email links
+- **Access is invite-only.** There is no `/signup` route and no `signUp` action. Accounts are created only by an admin via `POST /api/admin/users/invite`, and "Allow new users to sign up" is disabled in Supabase Auth so `auth.signUp()` is rejected at the source. This is a security boundary, not a preference: `on_auth_user_created` assigns `viewer`, and `viewer` holds `view` on all six child apps, so an open signup form handed any visitor read access to origin sheets, product codes, inventory, catalog, landing catalog, and plan tasks. Re-adding self-serve signup means changing that trigger first.
 - **Two auth entry points, for two different flows:**
   - `app/api/auth/callback/route.ts` — PKCE / OAuth. Reads `?code=` and calls `exchangeCodeForSession`.
   - `app/api/auth/confirm/route.ts` — email links (invite, signup, magic link, recovery, email change). Reads `?token_hash=` + `?type=` and calls `verifyOtp`.
@@ -199,9 +200,17 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 - `current_user_hierarchy_level()` — returns int for current auth user (used in RLS policies)
 
 ### Triggers
-- `on_auth_user_created` on `auth.users` — auto-assigns `viewer` role to new users
-- `audit_user_role_changes` on `user_roles` — logs role changes to `audit_logs`
+- `on_auth_user_created` on `auth.users` — auto-assigns `viewer` role to new users. Because `viewer` holds `view` on every child app, this is why signup must stay invite-only (see Authentication)
+- `audit_user_role_changes` on `user_roles` — INSERT/UPDATE/**DELETE** → `audit_logs` (migration 010 added DELETE; without it, revoking access was unrecorded)
+- `audit_user_permission_changes` on `user_permissions` — INSERT/UPDATE/DELETE → `audit_logs`. `resource_id` is the *subject* user, so filtering the audit log by a user id returns their role and override history together
 - `set_roles_updated_at` / `set_user_roles_updated_at` — auto-updates `updated_at`
+
+### Audit coverage
+`audit_logs` has **no INSERT policy**, so every writer is `SECURITY DEFINER`. Two paths:
+- **Triggers** (above) cover role and override changes from any client, including the child apps.
+- **`log_audit_event(action, resource_type, resource_id, new_data, old_data)`** — RPC for events with no table mutation of their own to hang a trigger off. Requires level >= 80 so a low-privilege session cannot forge history. Currently used by the invite route to record the invited address, which no trigger would otherwise capture.
+
+Still not captured: `ip_address` and `user_agent` exist on `audit_logs` and are never populated — triggers cannot see request headers.
 
 ### RLS Policy Summary
 - `roles` / `permissions` — all authenticated can read; only super_admin (level 100) can modify
@@ -222,7 +231,7 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 - `supabase/migrations/001_expand_rbac.sql` — Full migration file. Run in Supabase SQL editor.
 - The migration handles: creating new tables, seeding roles/permissions/role_permissions, migrating `user_roles` from varchar `role` to FK `role_id`, dropping and recreating dependent RLS policies on `audit_logs` and `product_codes`, adding RPC functions, triggers, and RLS policies.
 - `001` is **run-once and not idempotent** — bare `CREATE TABLE`, and it drops `user_roles.role`. Only run it against a database that has never had it applied.
-- `002`–`009` are follow-up migrations, each idempotent (`CREATE OR REPLACE`, `DROP POLICY IF EXISTS`, `ON CONFLICT`) and safe to re-run. Apply them in order after `001`. Most recent: `009_align_role_permissions_read_with_manage_users.sql` — makes the `role_permissions` read policy accept `access.manage_users`, matching what the API routes actually gate on.
+- `002`–`010` are follow-up migrations, each idempotent (`CREATE OR REPLACE`, `DROP POLICY IF EXISTS`, `ON CONFLICT`) and safe to re-run. Apply them in order after `001`. Most recent: `010_audit_removals_and_overrides.sql` — adds DELETE auditing on `user_roles`, full auditing on `user_permissions`, and the `log_audit_event()` RPC. Before it, user removal and permission-override changes were entirely unrecorded.
 - After running the migration, promote yourself to super_admin:
   ```sql
   UPDATE public.user_roles
@@ -238,7 +247,6 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 | Route | Access | Description |
 |-------|--------|-------------|
 | `/login` | Public | Email/password login |
-| `/signup` | Public | Account registration |
 | `/` | Authenticated | Dashboard — user info, permission summary, quick actions |
 | `/users` | `manage_users` | User list with search, invite modal, remove button |
 | `/users/[id]` | `manage_users` | User detail: role selector, permission matrix, remove |
