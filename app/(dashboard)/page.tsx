@@ -3,7 +3,11 @@
 import { useRole } from '@/app/contexts/RoleContext';
 import Link from 'next/link';
 import RoleBadge from '@/app/components/ui/RoleBadge';
-import { getAppMetadata, safeExternalUrl } from '@/app/lib/rbac/permissions';
+import {
+  formatAppName,
+  getAppMetadata,
+  safeExternalUrl,
+} from '@/app/lib/rbac/permissions';
 
 export default function DashboardPage() {
   const {
@@ -58,14 +62,31 @@ export default function DashboardPage() {
     );
   }
 
-  // Group permissions by app for display
+  // Group permissions by app, then by resource. Grouping by app alone rendered
+  // resource-scoped permissions as repeated chips — Plan showed "view" and
+  // "edit" twice because it has both on `tasks` and on `origin_links` — which
+  // reads as a bug rather than as two distinct grants.
   const permsByApp = permissions.reduce(
     (acc, p) => {
-      (acc[p.app] ??= []).push(p);
+      const byResource = (acc[p.app] ??= {});
+      // '' keys the app-level permissions that have no resource (Rhino Access).
+      (byResource[p.resource ?? ''] ??= []).push(p);
       return acc;
     },
-    {} as Record<string, typeof permissions>
+    {} as Record<string, Record<string, typeof permissions>>
   );
+
+  // Read order rather than whatever the query returned: broadest first, then
+  // anything unrecognised alphabetically.
+  const ACTION_ORDER = ['view', 'create', 'edit', 'delete', 'approve'];
+  const sortActions = (a: string, b: string) => {
+    const ia = ACTION_ORDER.indexOf(a);
+    const ib = ACTION_ORDER.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b);
+  };
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-slate-50">
@@ -100,8 +121,9 @@ export default function DashboardPage() {
               <p className="text-sm text-slate-500">No permissions assigned</p>
             ) : (
               <div className="space-y-3">
-                {Object.entries(permsByApp).map(([app, perms]) => {
+                {Object.entries(permsByApp).map(([app, byResource]) => {
                   const appInfo = getAppMetadata(apps, app);
+                  const showResourceLabels = Object.keys(byResource).length > 1;
                   // This card is the only app listing a non-admin ever sees —
                   // /apps is gated behind manage_users — so it carries the links
                   // out to the ecosystem.
@@ -139,16 +161,33 @@ export default function DashboardPage() {
                           {appInfo.display_name}
                         </span>
                       )}
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {perms.map((p, i) => (
-                          <span
-                            key={i}
-                            className="inline-block px-2 py-0.5 text-xs bg-slate-100 text-slate-600 rounded"
-                          >
-                            {p.action}
-                          </span>
+                      {Object.entries(byResource)
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([resource, resourcePerms]) => (
+                          <div key={resource} className="mt-1">
+                            {/* Only label the resource when the app has more
+                                than one — a lone "Product Codes" heading under
+                                Rhino Code would be noise. */}
+                            {showResourceLabels && resource && (
+                              <span className="block text-[11px] text-slate-400 mb-0.5">
+                                {formatAppName(resource)}
+                              </span>
+                            )}
+                            <div className="flex flex-wrap gap-1">
+                              {resourcePerms
+                                .map((p) => p.action)
+                                .sort(sortActions)
+                                .map((action) => (
+                                  <span
+                                    key={`${resource}-${action}`}
+                                    className="inline-block px-2 py-0.5 text-xs bg-slate-100 text-slate-600 rounded"
+                                  >
+                                    {action}
+                                  </span>
+                                ))}
+                            </div>
+                          </div>
                         ))}
-                      </div>
                     </div>
                   );
                 })}
