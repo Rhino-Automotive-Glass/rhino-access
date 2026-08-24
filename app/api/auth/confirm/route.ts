@@ -86,8 +86,10 @@ export async function GET(request: Request) {
     )
   }
 
-  // A recovery link means the user still has to choose a new password; every
-  // other type lands on an authenticated session and can go to the dashboard.
-  const destination = type === 'recovery' ? '/login' : '/'
+  // verifyOtp has established a session. A recovery link means the user still
+  // has to choose a new password, so send them somewhere they can — /login
+  // would strand an already-authenticated user on a sign-in form. Every other
+  // type is done and can go to the dashboard.
+  const destination = type === 'recovery' ? '/reset-password' : '/'
   return NextResponse.redirect(new URL(destination, request.url))
 }

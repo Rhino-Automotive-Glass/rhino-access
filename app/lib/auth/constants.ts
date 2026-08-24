@@ -2,9 +2,11 @@
 // by an admin via POST /api/admin/users/invite, and "Allow new users to sign up"
 // is disabled in Supabase Auth so auth.signUp() is rejected at the source.
 export const AUTH_ROUTES = {
-  public: ['/login'],
+  public: ['/login', '/forgot-password', '/reset-password'],
   protected: ['/'],
   login: '/login',
+  forgotPassword: '/forgot-password',
+  resetPassword: '/reset-password',
   dashboard: '/',
 } as const
 
