@@ -50,12 +50,15 @@ Three Supabase client variants used depending on context:
 - **Two auth entry points, for two different flows:**
   - `app/api/auth/callback/route.ts` — PKCE / OAuth. Reads `?code=` and calls `exchangeCodeForSession`.
   - `app/api/auth/confirm/route.ts` — email links (invite, signup, magic link, recovery, email change). Reads `?token_hash=` + `?type=` and calls `verifyOtp`.
-- **The Supabase email templates must link to `/api/auth/confirm` with the token hash as a query param:**
+- **The Supabase email templates must link to `/api/auth/confirm` with the token hash as a query param, built from `{{ .RedirectTo }}`:**
+  ```html
+  <a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&amp;type=invite">Accept the invite</a>
   ```
-  {{ .SiteURL }}/api/auth/confirm?token_hash={{ .TokenHash }}&type={{ .EmailActionType }}
-  ```
-  The default `{{ .ConfirmationURL }}` returns the session in the URL **fragment** (`#access_token=…`). Fragments are never sent to the server, so a route handler structurally cannot read them — that is why invite links silently failed before.
-- Any `redirectTo` / `emailRedirectTo` URL must also appear in the project's Auth **Redirect URLs** allowlist, or Supabase quietly substitutes the configured Site URL.
+  Two things this gets right, both learned the hard way:
+  - **Not `{{ .ConfirmationURL }}`** — that returns the session in the URL **fragment** (`#access_token=…`). Fragments are never sent to the server, so a route handler structurally cannot read them.
+  - **Not `{{ .SiteURL }}`** — several apps share this Supabase project, but there is only **one** project-wide Site URL and **one** set of email templates. Site URL currently points at Rhino Code (`rhino-product-code-description.vercel.app`), so a `{{ .SiteURL }}`-based link sent Rhino Access invitees to that app, which answered `{"error":"Unauthorized"}`. `{{ .RedirectTo }}` resolves to the `redirectTo` the *calling* app passed, so one shared template serves every app.
+- Because the template appends `?token_hash=…`, the `redirectTo` passed from code must carry **no query string of its own** — otherwise the link gets two `?`.
+- Any `redirectTo` / `emailRedirectTo` URL must appear in the project's Auth **Redirect URLs** allowlist. An unlisted value is silently dropped in favour of Site URL — which lands you back on the wrong app with no error explaining why.
 - `redirect()` throws `NEXT_REDIRECT` internally — do NOT wrap server action calls in try/catch or it will flash an error before the redirect completes
 
 ### Supabase TypeScript Gotcha

@@ -56,16 +56,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Invite the user via Supabase admin. redirectTo is where the Invite email
-    // template's {{ .SiteURL }} / {{ .ConfirmationURL }} sends the recipient
-    // after Supabase verifies the token; /api/auth/confirm reads the token hash
-    // from the query string. Whatever URL is used here must also be listed in
-    // the project's Auth "Redirect URLs" allowlist, or Supabase silently falls
-    // back to the configured Site URL.
+    // Several apps share this Supabase project, but the project has a single
+    // Site URL and a single set of email templates. Site URL points at another
+    // app, so a template built on {{ .SiteURL }} sends Rhino Access invitees to
+    // the wrong domain. The Invite template therefore builds its link from
+    // {{ .RedirectTo }} — this value — which makes the shared template work for
+    // whichever app sent the invite.
+    //
+    // Keep this URL free of query parameters: the template appends its own
+    // (?token_hash=...&type=invite), so anything here would produce a second
+    // '?' and a malformed link.
+    //
+    // It must also match the project's Auth "Redirect URLs" allowlist. An
+    // unlisted redirect is silently dropped in favour of Site URL, which is
+    // exactly the failure this is working around.
     const siteUrl = getSiteUrl();
     const { data, error } = await adminClient.auth.admin.inviteUserByEmail(
       email,
-      { redirectTo: `${siteUrl}/api/auth/confirm?type=invite` }
+      { redirectTo: `${siteUrl}/api/auth/confirm` }
     );
 
     if (error) {
