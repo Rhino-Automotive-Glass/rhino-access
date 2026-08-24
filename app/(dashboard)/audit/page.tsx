@@ -126,11 +126,19 @@ export default function AuditPage() {
                     <p className="text-xs text-slate-500 mt-0.5">
                       by {entry.user_email ?? 'system'}
                     </p>
-                    {entry.new_data && (
-                      <pre className="mt-1 text-xs text-slate-500 overflow-hidden text-ellipsis max-w-full">
-                        {JSON.stringify(entry.new_data, null, 2).slice(0, 200)}
-                      </pre>
-                    )}
+                    {/* A delete has no new_data, so showing only that would
+                        render the most important rows — access being revoked —
+                        as an empty entry. Fall back to what was removed. */}
+                    {(() => {
+                      const payload = entry.new_data ?? entry.old_data;
+                      if (!payload) return null;
+                      return (
+                        <pre className="mt-1 text-xs text-slate-500 overflow-hidden text-ellipsis max-w-full">
+                          {!entry.new_data && entry.old_data ? 'removed: ' : ''}
+                          {JSON.stringify(payload, null, 2).slice(0, 200)}
+                        </pre>
+                      );
+                    })()}
                   </div>
                   <div className="flex-shrink-0 text-xs text-slate-400 whitespace-nowrap">
                     {new Date(entry.created_at).toLocaleString()}
