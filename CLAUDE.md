@@ -234,7 +234,7 @@ Still not captured: `ip_address` and `user_agent` exist on `audit_logs` and are 
 - `supabase/migrations/001_expand_rbac.sql` — Full migration file. Run in Supabase SQL editor.
 - The migration handles: creating new tables, seeding roles/permissions/role_permissions, migrating `user_roles` from varchar `role` to FK `role_id`, dropping and recreating dependent RLS policies on `audit_logs` and `product_codes`, adding RPC functions, triggers, and RLS policies.
 - `001` is **run-once and not idempotent** — bare `CREATE TABLE`, and it drops `user_roles.role`. Only run it against a database that has never had it applied.
-- `002`–`011` are follow-up migrations, each idempotent (`CREATE OR REPLACE`, `DROP POLICY IF EXISTS`, `ON CONFLICT`) and safe to re-run. Apply them in order after `001`. Most recent: `011_paginate_and_search_audit_logs.sql` — adds the `search_audit_logs(query, limit, offset)` RPC plus a `created_at DESC` index, moving audit search and paging into the database.
+- `002`–`012` are follow-up migrations, each idempotent (`CREATE OR REPLACE`, `DROP POLICY IF EXISTS`, `ON CONFLICT`) and safe to re-run. Apply them in order after `001`. Most recent: `012_audit_writers_tolerate_unknown_actor.sql` — `audit_logs.user_id` is NOT NULL, but the 010 writers recorded `auth.uid()`, which is NULL for service_role, SQL-editor, and cascade operations. The `user_roles` DELETE trigger would therefore **block** any user deletion not performed through this app. The writers now fall back to a non-null actor and mark `user_email` as `system` when the real actor is unknown.
 - After running the migration, promote yourself to super_admin:
   ```sql
   UPDATE public.user_roles
