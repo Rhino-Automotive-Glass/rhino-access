@@ -26,7 +26,7 @@ Copy `.env.local.example` to `.env.local`. Required values from Supabase dashboa
 - `NEXT_PUBLIC_SUPABASE_URL` — Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase publishable anon key
 - `SUPABASE_SERVICE_ROLE_KEY` — Service role key (server-only, bypasses RLS)
-- `NEXT_PUBLIC_SITE_URL` — Site URL for email redirects (auto-set on Vercel via `VERCEL_URL`)
+- `NEXT_PUBLIC_SITE_URL` — Canonical site URL for links in auth emails. **Must be set explicitly in every environment, including Vercel production.** Nothing auto-sets it. `app/lib/auth/siteUrl.ts` falls back to `VERCEL_URL` and then to `http://localhost:3000`; the `VERCEL_URL` fallback yields the deployment-specific hostname (`rhino-access-<hash>.vercel.app`), not the production domain, so invite links built from it are unstable. When it was unset in production, invite emails pointed at `http://localhost:3000` and were unusable for the recipient.
 
 ## Architecture
 
@@ -45,7 +45,16 @@ Three Supabase client variants used depending on context:
 ### Authentication (`app/lib/auth/`)
 - `actions.ts` — Server actions (`'use server'`) for `signIn`, `signUp`, `signOut`
 - `constants.ts` — Route paths and error message constants
-- OAuth callback at `app/api/auth/callback/route.ts`
+- `siteUrl.ts` — `getSiteUrl()`, the single source for the base URL used in auth email links
+- **Two auth entry points, for two different flows:**
+  - `app/api/auth/callback/route.ts` — PKCE / OAuth. Reads `?code=` and calls `exchangeCodeForSession`.
+  - `app/api/auth/confirm/route.ts` — email links (invite, signup, magic link, recovery, email change). Reads `?token_hash=` + `?type=` and calls `verifyOtp`.
+- **The Supabase email templates must link to `/api/auth/confirm` with the token hash as a query param:**
+  ```
+  {{ .SiteURL }}/api/auth/confirm?token_hash={{ .TokenHash }}&type={{ .EmailActionType }}
+  ```
+  The default `{{ .ConfirmationURL }}` returns the session in the URL **fragment** (`#access_token=…`). Fragments are never sent to the server, so a route handler structurally cannot read them — that is why invite links silently failed before.
+- Any `redirectTo` / `emailRedirectTo` URL must also appear in the project's Auth **Redirect URLs** allowlist, or Supabase quietly substitutes the configured Site URL.
 - `redirect()` throws `NEXT_REDIRECT` internally — do NOT wrap server action calls in try/catch or it will flash an error before the redirect completes
 
 ### Supabase TypeScript Gotcha

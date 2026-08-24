@@ -4,6 +4,7 @@ import {
   requireTargetUserBelowRequester,
 } from '@/app/lib/rbac/apiMiddleware';
 import { createAdminClient } from '@/app/lib/supabase/admin';
+import { getSiteUrl } from '@/app/lib/auth/siteUrl';
 import { inviteUserSchema } from '@/app/lib/validations/schemas';
 
 export async function POST(request: NextRequest) {
@@ -55,11 +56,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Invite the user via Supabase admin
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+    // Invite the user via Supabase admin. redirectTo is where the Invite email
+    // template's {{ .SiteURL }} / {{ .ConfirmationURL }} sends the recipient
+    // after Supabase verifies the token; /api/auth/confirm reads the token hash
+    // from the query string. Whatever URL is used here must also be listed in
+    // the project's Auth "Redirect URLs" allowlist, or Supabase silently falls
+    // back to the configured Site URL.
+    const siteUrl = getSiteUrl();
     const { data, error } = await adminClient.auth.admin.inviteUserByEmail(
       email,
-      { redirectTo: `${siteUrl}/api/auth/callback` }
+      { redirectTo: `${siteUrl}/api/auth/confirm?type=invite` }
     );
 
     if (error) {
