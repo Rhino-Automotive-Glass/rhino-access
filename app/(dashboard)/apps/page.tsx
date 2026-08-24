@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRole } from '@/app/contexts/RoleContext';
+import { safeExternalUrl } from '@/app/lib/rbac/permissions';
 import type { ConnectedApp } from '@/app/lib/rbac/types';
 
 interface AppSummary extends ConnectedApp {
@@ -50,17 +51,22 @@ export default function AppsPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {summaries.map((app) => (
+            {summaries.map((app) => {
+              // Inactive apps stay unlinked — the badge says they are not in
+              // service, so offering a way in would contradict it.
+              const href = app.is_active ? safeExternalUrl(app.url) : null;
+
+              return (
               <div key={app.key} className="card card-hover p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <div
-                    className={`w-10 h-10 ${app.color} rounded-lg flex items-center justify-center`}
+                    className={`w-10 h-10 ${app.color} rounded-lg flex items-center justify-center shrink-0`}
                   >
                     <span className="text-white text-sm font-bold">
                       {app.display_name.split(' ')[1]?.[0] ?? app.display_name[0]}
                     </span>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <h2 className="text-lg font-semibold text-slate-900">
                       {app.display_name}
                     </h2>
@@ -71,9 +77,35 @@ export default function AppsPage() {
                     )}
                   </div>
                 </div>
-                <p className="text-sm text-slate-500 mb-4 truncate">
-                  {app.url ?? app.description ?? app.key}
-                </p>
+                {href ? (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 hover:underline mb-4 max-w-full"
+                  >
+                    <span className="truncate">{app.url}</span>
+                    <svg
+                      className="w-3.5 h-3.5 shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                      />
+                    </svg>
+                    <span className="sr-only">(opens in a new tab)</span>
+                  </a>
+                ) : (
+                  <p className="text-sm text-slate-500 mb-4 truncate">
+                    {app.description ?? app.key}
+                  </p>
+                )}
                 <div className="flex gap-6 text-sm">
                   <div>
                     <span className="text-2xl font-bold text-slate-900">
@@ -89,7 +121,8 @@ export default function AppsPage() {
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

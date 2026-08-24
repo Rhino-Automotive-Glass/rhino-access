@@ -3,7 +3,7 @@
 import { useRole } from '@/app/contexts/RoleContext';
 import Link from 'next/link';
 import RoleBadge from '@/app/components/ui/RoleBadge';
-import { getAppMetadata } from '@/app/lib/rbac/permissions';
+import { getAppMetadata, safeExternalUrl } from '@/app/lib/rbac/permissions';
 
 export default function DashboardPage() {
   const {
@@ -102,11 +102,43 @@ export default function DashboardPage() {
               <div className="space-y-3">
                 {Object.entries(permsByApp).map(([app, perms]) => {
                   const appInfo = getAppMetadata(apps, app);
+                  // This card is the only app listing a non-admin ever sees —
+                  // /apps is gated behind manage_users — so it carries the links
+                  // out to the ecosystem.
+                  const href = appInfo.is_active
+                    ? safeExternalUrl(appInfo.url)
+                    : null;
                   return (
                     <div key={app}>
-                      <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
-                        {appInfo.display_name}
-                      </span>
+                      {href ? (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline uppercase tracking-wide"
+                        >
+                          {appInfo.display_name}
+                          <svg
+                            className="w-3 h-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            aria-hidden="true"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                            />
+                          </svg>
+                          <span className="sr-only">(opens in a new tab)</span>
+                        </a>
+                      ) : (
+                        <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+                          {appInfo.display_name}
+                        </span>
+                      )}
                       <div className="mt-1 flex flex-wrap gap-1">
                         {perms.map((p, i) => (
                           <span

@@ -74,6 +74,24 @@ export function getAppMetadata(apps: ConnectedApp[], appKey: string) {
   return apps.find((app) => app.key === appKey) ?? getFallbackAppMetadata(appKey);
 }
 
+/**
+ * connected_apps.url is stored data, editable by any super_admin. Render it as a
+ * link only when it is genuinely http(s): a `javascript:` or `data:` value in an
+ * href would execute in the clicking user's session. Returns null when the URL
+ * is missing or unusable, so callers can fall back to plain text.
+ */
+export function safeExternalUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function sortApps(apps: ConnectedApp[]) {
   return [...apps].sort((a, b) => {
     if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
