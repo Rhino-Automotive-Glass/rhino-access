@@ -1,22 +1,10 @@
 BEGIN;
 
--- audit_logs.user_id is NOT NULL, but the audit writers added in migration 010
--- record auth.uid() as the actor, which is NULL whenever there is no JWT:
--- service_role calls, the SQL editor, or an ON DELETE CASCADE from auth.users.
---
--- The dangerous case is the user_roles DELETE trigger. Deleting a user from the
--- Supabase dashboard cascades into user_roles, the trigger fires with a NULL
--- actor, the insert violates the constraint, and the DELETE ITSELF FAILS. In
--- other words 010 could block user deletion performed anywhere other than
--- through this app.
---
--- Fall back to an actor that is guaranteed non-null while keeping the row
--- honest: user_email is set to 'system' whenever the real actor is unknown, so
--- a fallback id is never mistaken for a genuine attribution. The pre-existing
--- INSERT/UPDATE path already used this pattern.
---
--- audit_logs is shared with the other apps on this project, so the NOT NULL
--- constraint is deliberately left alone rather than relaxed underneath them.
+-- Audit writers here match production after sibling migration 016. When no
+-- authenticated actor exists, preserve a fallback email of 'system'. If the
+-- fallback actor was deleted from auth.users, store NULL in audit_logs.user_id
+-- rather than violating its foreign key. Production made this column nullable.
+-- Re-running this migration must not restore the pre-016 audit function bodies.
 
 CREATE OR REPLACE FUNCTION public.log_role_change()
 RETURNS TRIGGER
@@ -33,6 +21,12 @@ BEGIN
     -- OLD.assigned_by is whoever granted the role, not whoever is removing it,
     -- so it is only a fallback for attribution of last resort.
     actor_id := COALESCE(known_actor, OLD.assigned_by, OLD.user_id);
+    -- 016: the actor can be the user being deleted (their user_roles /
+    -- user_permissions rows cascade away with them). Referencing them would
+    -- violate audit_logs' foreign key; record NULL, user_email keeps who.
+    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = actor_id) THEN
+      actor_id := NULL;
+    END IF;
     actor_email := COALESCE(
       (SELECT email FROM auth.users WHERE id = known_actor),
       'system'
@@ -70,6 +64,8 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+REVOKE EXECUTE ON FUNCTION public.log_role_change() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.log_role_change() TO authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.log_permission_override_change()
 RETURNS TRIGGER
@@ -83,6 +79,13 @@ DECLARE
   granted_by_id uuid := CASE WHEN TG_OP = 'DELETE' THEN OLD.granted_by ELSE NEW.granted_by END;
   actor_id uuid := COALESCE(known_actor, granted_by_id, subject_id);
 BEGIN
+  -- 016: the actor can be the user being deleted (their user_roles /
+  -- user_permissions rows cascade away with them). Referencing them would
+  -- violate audit_logs' foreign key; record NULL, user_email keeps who.
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = actor_id) THEN
+    actor_id := NULL;
+  END IF;
+
   INSERT INTO public.audit_logs (
     action, resource_type, resource_id, old_data, new_data, user_id, user_email
   ) VALUES (
@@ -102,6 +105,8 @@ BEGIN
   RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
 END;
 $$;
+REVOKE EXECUTE ON FUNCTION public.log_permission_override_change() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.log_permission_override_change() TO authenticated, service_role;
 
 -- log_audit_event records application events that have no subject row to fall
 -- back on, so an unknown actor is a genuine error. Fail with a clear message
@@ -154,5 +159,7 @@ BEGIN
   );
 END;
 $$;
+REVOKE EXECUTE ON FUNCTION public.log_audit_event(text,text,uuid,jsonb,jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.log_audit_event(text,text,uuid,jsonb,jsonb) TO authenticated, service_role;
 
 COMMIT;

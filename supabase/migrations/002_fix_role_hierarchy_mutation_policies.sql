@@ -1,5 +1,15 @@
 BEGIN;
 
+-- Production uses private.hierarchy_level() from sibling migration 015.
+-- Re-running this historical file would restore unrestricted hierarchy lookups.
+DO $$
+BEGIN
+  IF to_regprocedure('private.hierarchy_level(uuid)') IS NOT NULL THEN
+    RAISE EXCEPTION 'Migration 002 predates the private hierarchy guard; do not re-apply after 015';
+  END IF;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.user_hierarchy_level(p_user_id uuid)
 RETURNS int
 LANGUAGE sql
