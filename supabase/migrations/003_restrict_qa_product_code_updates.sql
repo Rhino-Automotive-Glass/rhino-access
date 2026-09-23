@@ -1,5 +1,15 @@
 BEGIN;
 
+-- The live product-code update guard was revised after this migration.
+-- Re-running this historical file would replace that guard and recreate RLS.
+DO $$
+BEGIN
+  IF to_regprocedure('private.hierarchy_level(uuid)') IS NOT NULL THEN
+    RAISE EXCEPTION 'Migration 003 predates the live product-code update guard; do not re-apply after 015';
+  END IF;
+END;
+$$;
+
 -- RLS controls row eligibility. This trigger provides the column-level guard:
 -- QA-level users can update product_codes rows only when verified is the sole
 -- client-changed field. Admins keep full update access.

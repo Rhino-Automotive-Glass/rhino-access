@@ -158,7 +158,7 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 1. Admin invites user via `/users` page → calls `POST /api/admin/users/invite`
 2. Supabase sends invite email via `adminClient.auth.admin.inviteUserByEmail()`
 3. User's role is assigned immediately in `user_roles`
-4. If a user signs up directly (not invited), the `on_auth_user_created` trigger auto-assigns `viewer` role
+4. Accounts created directly in the shared project remain without a role until an admin assigns one; production removed `on_auth_user_created` in migration 018
 
 ### User Deletion
 
@@ -189,7 +189,7 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 - `current_user_hierarchy_level()` — returns int for current auth user (used in RLS policies)
 
 ### Triggers
-- `on_auth_user_created` on `auth.users` — auto-assigns `viewer` role to new users
+- `on_auth_user_created` was removed in production migration 018; direct accounts have no role until assigned
 - `audit_user_role_changes` on `user_roles` — logs role changes to `audit_logs`
 - `set_roles_updated_at` / `set_user_roles_updated_at` — auto-updates `updated_at`
 
@@ -198,8 +198,8 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 - `role_permissions` — admin+ (level 80) can read; only super_admin can modify
 - `user_roles` — users can read their own; admin+ can read all; admin+ can insert/update with hierarchy check
 - `user_permissions` — users can read their own; admin+ can read/manage all
-- `audit_logs` — admin+ can read (policy recreated by migration to use new schema)
-- `product_codes` — admin+ can create/update/delete; QA+ (level 50) can toggle verified
+- `audit_logs` — admin+ can read; authenticated users can insert rows attributed to their own user ID
+- `product_codes` — public can read; editor+ (level 60) can create and edit; QA (level 50) can change only `verified`; admin+ can delete
 
 ### Migration
 - `supabase/migrations/001_expand_rbac.sql` — Full migration file. Run in Supabase SQL editor.

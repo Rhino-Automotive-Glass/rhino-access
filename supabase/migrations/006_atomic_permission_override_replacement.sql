@@ -1,5 +1,15 @@
 BEGIN;
 
+-- Production's 015 guard compares real levels through private.hierarchy_level.
+-- Re-running this historical file would let public hierarchy masking bypass it.
+DO $$
+BEGIN
+  IF to_regprocedure('private.hierarchy_level(uuid)') IS NOT NULL THEN
+    RAISE EXCEPTION 'Migration 006 predates the private hierarchy guard; do not re-apply after 015';
+  END IF;
+END;
+$$;
+
 -- Replace user-specific permission overrides as a single database statement.
 -- PostgreSQL rolls back the delete/insert work if any validation or insert fails,
 -- so existing overrides remain unchanged on errors.

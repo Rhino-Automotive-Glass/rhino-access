@@ -1,6 +1,6 @@
-// Access is invite-only: there is no public signup route. Accounts are created
-// by an admin via POST /api/admin/users/invite, and "Allow new users to sign up"
-// is disabled in Supabase Auth so auth.signUp() is rejected at the source.
+// This app has no public signup route. Admins create accounts through
+// POST /api/admin/users/invite. Accounts created directly in the shared
+// Supabase project remain without a role until an admin assigns one.
 export const AUTH_ROUTES = {
   public: ['/login', '/forgot-password', '/reset-password'],
   protected: ['/'],
