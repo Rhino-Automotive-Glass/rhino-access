@@ -217,7 +217,7 @@ Still not captured: `ip_address` and `user_agent` exist on `audit_logs` and are 
 
 ### RLS Policy Summary
 - `roles` / `permissions` — all authenticated can read; only super_admin (level 100) can modify
-- `role_permissions` — admin+ (level 80) **or** anyone holding `access.manage_users` can read; only super_admin can modify. The `manage_users` clause matters because the API routes gate on that permission, not on level — without it, a sub-80 user granted `manage_users` via override gets a silently empty result set instead of an error (see migration 009)
+- `role_permissions` — admin+ (level 80) can read; only super_admin can modify. A sub-80 user granted `access.manage_users` through an override still cannot read other users' roles or role permissions; the API's permission gate alone does not grant RLS access.
 - `user_roles` — users can read their own; admin+ can read all; admin+ can insert/update with hierarchy check
 - `user_permissions` — users can read their own; admin+ can read/manage all
 - `audit_logs` — admin+ can read (policy recreated by migration to use new schema)
@@ -225,16 +225,16 @@ Still not captured: `ip_address` and `user_agent` exist on `audit_logs` and are 
 
 ### Migration
 
-> **Do NOT run `supabase db push` in this repo.** Migrations here are applied by hand in the Supabase SQL editor, so the remote `schema_migrations` table has no record of `001`–`009`. The CLI therefore considers all of them pending, and a push would re-run `001` against the live database — `CREATE TABLE public.roles` on an existing table and `ALTER TABLE public.user_roles DROP COLUMN role` on the live column. The CLI is linked (`supabase/config.toml` exists) purely for read-only inspection such as `supabase migration list`.
+> **Do NOT run `supabase db push` in this repo.** Migrations here are applied by hand in the Supabase SQL editor, so the remote `schema_migrations` table has no record of this repo's numbered migrations. The CLI therefore considers them pending, and a push would re-run `001` against the live database — `CREATE TABLE public.roles` on an existing table and `ALTER TABLE public.user_roles DROP COLUMN role` on the live column. The CLI is linked (`supabase/config.toml` exists) purely for read-only inspection such as `supabase migration list`.
 >
-> The remote history contains ~8 timestamped migrations dated 2026-05-14 → 2026-05-27 that do not correspond to any file here. They predate `002`–`008` (written 2026-06-02), so they belong to one of the sibling apps sharing this Supabase project. Reconciling the two histories — via `supabase migration repair --status applied` for `001`–`009` — would write this repo's version numbers into a `schema_migrations` table another repo also manages. Coordinate across repos before doing that; until then, apply migrations by hand.
+> The remote history contains timestamped migrations that do not correspond to files here. They belong to sibling apps sharing this Supabase project. Reconciling histories via `supabase migration repair` would write this repo's version numbers into a `schema_migrations` table another repo also manages. Coordinate across repos before doing that; until then, apply migrations by hand.
 
 **Applying a migration:** open the SQL editor for the project, paste the whole file, run it. Each file wraps itself in `BEGIN`/`COMMIT`, so it fully applies or fully rolls back.
 
 - `supabase/migrations/001_expand_rbac.sql` — Full migration file. Run in Supabase SQL editor.
 - The migration handles: creating new tables, seeding roles/permissions/role_permissions, migrating `user_roles` from varchar `role` to FK `role_id`, dropping and recreating dependent RLS policies on `audit_logs` and `product_codes`, adding RPC functions, triggers, and RLS policies.
 - `001` is **run-once and not idempotent** — bare `CREATE TABLE`, and it drops `user_roles.role`. Only run it against a database that has never had it applied.
-- `002`–`012` are follow-up migrations, each idempotent (`CREATE OR REPLACE`, `DROP POLICY IF EXISTS`, `ON CONFLICT`) and safe to re-run. Apply them in order after `001`. Most recent: `012_audit_writers_tolerate_unknown_actor.sql` — `audit_logs.user_id` is NOT NULL, but the 010 writers recorded `auth.uid()`, which is NULL for service_role, SQL-editor, and cascade operations. The `user_roles` DELETE trigger would therefore **block** any user deletion not performed through this app. The writers now fall back to a non-null actor and mark `user_email` as `system` when the real actor is unknown.
+- `009` was removed because its broader `role_permissions` read policy is not live in production and did not complete the below-admin access path. `010` remains for fresh replay: it adds DELETE auditing to `user_roles` and creates the `user_permissions` audit trigger. `011` and `012` are live; `013` records production security definitions applied through the sibling repository. Review each migration against live definitions before any production application.
 - After running the migration, promote yourself to super_admin:
   ```sql
   UPDATE public.user_roles

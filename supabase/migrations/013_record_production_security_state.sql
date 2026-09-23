@@ -2,8 +2,7 @@
 -- Production definitions below were read from pg_get_functiondef on project
 -- uzgomevojvzdzfunjhdr. The product-code update body also records the later
 -- production editor fix; the removed signup trigger records migration 018.
--- Migration 009 is not live and is deliberately omitted.
--- A replay that ran 009 must stop here until its policy drift is reviewed.
+-- The role_permissions read policy must match production's admin-only rule.
 
 BEGIN;
 
@@ -22,7 +21,7 @@ BEGIN
       AND cmd = 'SELECT'
       AND qual = '(current_user_hierarchy_level() >= 80)'
   ) THEN
-    RAISE EXCEPTION 'role_permissions policy differs from production; review unapplied 009 before proceeding';
+    RAISE EXCEPTION 'role_permissions policy differs from production; review policy drift before proceeding';
   END IF;
 END;
 $$;
