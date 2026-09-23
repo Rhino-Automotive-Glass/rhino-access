@@ -158,7 +158,7 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 1. Admin invites user via `/users` page → calls `POST /api/admin/users/invite`
 2. Supabase sends invite email via `adminClient.auth.admin.inviteUserByEmail()`
 3. User's role is assigned immediately in `user_roles`
-4. If a user signs up directly (not invited), the `on_auth_user_created` trigger auto-assigns `viewer` role
+4. Accounts created directly in the shared project remain without a role until an admin assigns one; production removed `on_auth_user_created` in migration 018
 
 ### User Deletion
 
