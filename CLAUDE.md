@@ -43,10 +43,10 @@ Three Supabase client variants used depending on context:
 - `admin.ts` — Admin client (uses service role key, bypasses RLS; server-only for `auth.admin.*` calls)
 
 ### Authentication (`app/lib/auth/`)
-- `actions.ts` — Server actions (`'use server'`) for `signIn`, `signUp`, `signOut`
+- `actions.ts` — Server actions (`'use server'`) for `signIn` and `signOut`
 - `constants.ts` — Route paths and error message constants
 - `siteUrl.ts` — `getSiteUrl()`, the single source for the base URL used in auth email links
-- **Access is invite-only.** There is no `/signup` route and no `signUp` action. Accounts are created only by an admin via `POST /api/admin/users/invite`, and "Allow new users to sign up" is disabled in Supabase Auth so `auth.signUp()` is rejected at the source. This is a security boundary, not a preference: `on_auth_user_created` assigns `viewer`, and `viewer` holds `view` on all six child apps, so an open signup form handed any visitor read access to origin sheets, product codes, inventory, catalog, landing catalog, and plan tasks. Re-adding self-serve signup means changing that trigger first.
+- **Access is invite-only.** There is no `/signup` route or `signUp` action. Accounts are created by an admin via `POST /api/admin/users/invite`. Production removed `on_auth_user_created` in migration 018, so direct accounts have no role until one is assigned.
 - **Two auth entry points, for two different flows:**
   - `app/api/auth/callback/route.ts` — PKCE / OAuth. Reads `?code=` and calls `exchangeCodeForSession`.
   - `app/api/auth/confirm/route.ts` — email links (invite, signup, magic link, recovery, email change). Reads `?token_hash=` + `?type=` and calls `verifyOtp`.
@@ -203,15 +203,15 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 - `current_user_hierarchy_level()` — returns int for current auth user (used in RLS policies)
 
 ### Triggers
-- `on_auth_user_created` on `auth.users` — auto-assigns `viewer` role to new users. Because `viewer` holds `view` on every child app, this is why signup must stay invite-only (see Authentication)
+- `on_auth_user_created` was removed in production migration 018; direct accounts have no role until assigned
 - `audit_user_role_changes` on `user_roles` — INSERT/UPDATE/**DELETE** → `audit_logs` (migration 010 added DELETE; without it, revoking access was unrecorded)
 - `audit_user_permission_changes` on `user_permissions` — INSERT/UPDATE/DELETE → `audit_logs`. `resource_id` is the *subject* user, so filtering the audit log by a user id returns their role and override history together
 - `set_roles_updated_at` / `set_user_roles_updated_at` — auto-updates `updated_at`
 
 ### Audit coverage
-`audit_logs` has **no INSERT policy**, so every writer is `SECURITY DEFINER`. Two paths:
+Production has a `System can insert audit logs` policy allowing any authenticated user to insert a row with their own `user_id`. The trigger and RPC writers remain:
 - **Triggers** (above) cover role and override changes from any client, including the child apps.
-- **`log_audit_event(action, resource_type, resource_id, new_data, old_data)`** — RPC for events with no table mutation of their own to hang a trigger off. Requires level >= 80 so a low-privilege session cannot forge history. Currently used by the invite route to record the invited address, which no trigger would otherwise capture.
+- **`log_audit_event(action, resource_type, resource_id, new_data, old_data)`** — RPC for events with no table mutation of their own to hang a trigger off. Requires level >= 80. The direct INSERT policy permits lower-privilege sessions to write entries attributed to themselves; review it separately before treating audit history as tamper resistant. The invite route uses this RPC to record the invited address.
 
 Still not captured: `ip_address` and `user_agent` exist on `audit_logs` and are never populated — triggers cannot see request headers.
 
@@ -220,8 +220,8 @@ Still not captured: `ip_address` and `user_agent` exist on `audit_logs` and are 
 - `role_permissions` — admin+ (level 80) can read; only super_admin can modify. A sub-80 user granted `access.manage_users` through an override still cannot read other users' roles or role permissions; the API's permission gate alone does not grant RLS access.
 - `user_roles` — users can read their own; admin+ can read all; admin+ can insert/update with hierarchy check
 - `user_permissions` — users can read their own; admin+ can read/manage all
-- `audit_logs` — admin+ can read (policy recreated by migration to use new schema)
-- `product_codes` — admin+ can create/update/delete; QA+ (level 50) can toggle verified
+- `audit_logs` — admin+ can read; authenticated users can insert rows attributed to their own user ID
+- `product_codes` — public can read; editor+ (level 60) can create and edit; QA (level 50) can change only `verified`; admin+ can delete
 
 ### Migration
 

@@ -101,9 +101,9 @@ export async function POST(request: NextRequest) {
           { onConflict: 'user_id' }
         );
 
-      // The invite email is already sent and the auth user exists. If the role
-      // write fails the on_auth_user_created trigger has left them as a viewer,
-      // so surface it instead of reporting a successful invite.
+      // The invite email is already sent and the auth user exists. Production
+      // has no default-role trigger; a failed write leaves the user without a
+      // role, so surface it instead of reporting a successful invite.
       if (roleAssignError) {
         console.error('Invite succeeded but role assignment failed', {
           userId: data.user.id,
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           {
             error:
-              'Invitation was sent, but the requested role could not be assigned. The user currently has the default Viewer role — set their role from the user detail page.',
+              'Invitation was sent, but the requested role could not be assigned. The user has no role — set their role from the user detail page.',
             user_id: data.user.id,
           },
           { status: 500 }

@@ -3,6 +3,8 @@
 -- uzgomevojvzdzfunjhdr. The product-code update body also records the later
 -- production editor fix; the removed signup trigger records migration 018.
 -- The role_permissions read policy must match production's admin-only rule.
+-- Sibling-owned product read/create and audit insert policies are asserted
+-- before dropping old policies; this prevents an incomplete cross-repo replay.
 
 BEGIN;
 
@@ -22,6 +24,41 @@ BEGIN
       AND qual = '(current_user_hierarchy_level() >= 80)'
   ) THEN
     RAISE EXCEPTION 'role_permissions policy differs from production; review policy drift before proceeding';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public' AND tablename = 'product_codes'
+      AND policyname = 'Allow public read access'
+      AND permissive = 'PERMISSIVE'
+      AND roles = ARRAY['public']::name[]
+      AND cmd = 'SELECT' AND qual = 'true' AND with_check IS NULL
+  ) THEN
+    RAISE EXCEPTION 'product_codes public-read policy differs from production; apply sibling policy first';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public' AND tablename = 'product_codes'
+      AND policyname = 'Editors can create product codes'
+      AND permissive = 'PERMISSIVE'
+      AND roles = ARRAY['authenticated']::name[]
+      AND cmd = 'INSERT' AND qual IS NULL
+      AND with_check = '(( SELECT current_user_hierarchy_level() AS current_user_hierarchy_level) >= 60)'
+  ) THEN
+    RAISE EXCEPTION 'product_codes editor-create policy differs from production; apply sibling policy first';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public' AND tablename = 'audit_logs'
+      AND policyname = 'System can insert audit logs'
+      AND permissive = 'PERMISSIVE'
+      AND roles = ARRAY['authenticated']::name[]
+      AND cmd = 'INSERT' AND qual IS NULL
+      AND with_check = '(user_id = auth.uid())'
+  ) THEN
+    RAISE EXCEPTION 'audit_logs insert policy differs from production; apply sibling policy first';
   END IF;
 END;
 $$;
