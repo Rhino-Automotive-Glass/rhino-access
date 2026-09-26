@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { LoginForm } from '@rhino-automotive-glass/auth-ui'
 import { createClient } from '@/app/lib/supabase/client'
+import { SIGNUP_ENABLED } from '@/app/lib/auth/constants'
 
 // /api/auth/callback and /api/auth/confirm redirect here with ?error= when a
 // link fails, so surface it above the form instead of failing silently.
@@ -47,10 +48,21 @@ export default function LoginPage() {
         >
           Forgot your password?
         </Link>
-        {/* No signup link: access is invite-only via POST /api/admin/users/invite. */}
-        <p className="text-slate-600">
-          Access is by invitation. Ask an administrator to invite you.
-        </p>
+        {SIGNUP_ENABLED ? (
+          <p className="text-slate-600">
+            Don&apos;t have an account?{' '}
+            <Link
+              href="/signup"
+              className="font-medium text-blue-600 hover:text-blue-500"
+            >
+              Sign up
+            </Link>
+          </p>
+        ) : (
+          <p className="text-slate-600">
+            Access is by invitation. Ask an administrator to invite you.
+          </p>
+        )}
       </div>
     </div>
   )

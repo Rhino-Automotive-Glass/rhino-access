@@ -46,11 +46,11 @@ Three Supabase client variants used depending on context:
 
 ### Authentication (`app/lib/auth/`)
 - `actions.ts` — Server action (`'use server'`) for `signOut`
-- **Auth UI comes from `@rhino-automotive-glass/auth-ui`**, the shared package used by the sibling Rhino apps (source: `../rhino-auth-ui`). `app/(auth)/layout.tsx` wraps `/login`, `/forgot-password`, and `/reset-password` in its `AuthLayout`; the pages render `LoginForm`, `ForgotPasswordForm`, and `UpdatePasswordForm` with the browser Supabase client. `app/globals.css` must keep `@import "@rhino-automotive-glass/auth-ui/styles.css";` or Tailwind will not scan the package and its classes are dropped. No `SignupForm` — access is invite-only.
-- `ForgotPasswordForm` is passed `redirectTo` = `<origin>/api/auth/confirm` explicitly. The package default (`/auth/callback`) does not exist in this app.
+- **Auth UI comes from `@rhino-automotive-glass/auth-ui`**, the shared package used by the sibling Rhino apps (source: `../rhino-auth-ui`). `app/(auth)/layout.tsx` wraps `/login`, `/signup`, `/forgot-password`, and `/reset-password` in its `AuthLayout`; the pages render `LoginForm`, `SignupForm`, `ForgotPasswordForm`, and `UpdatePasswordForm` with the browser Supabase client. `app/globals.css` must keep `@import "@rhino-automotive-glass/auth-ui/styles.css";` or Tailwind will not scan the package and its classes are dropped.
+- `SignupForm` and `ForgotPasswordForm` are passed `redirectTo` = `<origin>/api/auth/confirm` explicitly. The package default (`/auth/callback`) does not exist in this app.
 - `constants.ts` — Route paths and error message constants
 - `siteUrl.ts` — `getSiteUrl()`, the single source for the base URL used in auth email links
-- **Access is invite-only.** There is no `/signup` route or `signUp` action. Accounts are created by an admin via `POST /api/admin/users/invite`. Production removed `on_auth_user_created` in migration 018, so direct accounts have no role until one is assigned.
+- **Public signup is temporarily open**, controlled by `SIGNUP_ENABLED` in `app/lib/auth/constants.ts`. Set it to `false` to return to invite-only: `/signup` then 404s and the login page shows the invitation notice instead of the signup link. Admin invites via `POST /api/admin/users/invite` work either way. Production removed `on_auth_user_created` in migration 018, so self-signed-up accounts have **no role and no permissions** until an admin assigns one on `/users/[id]`.
 - **Two auth entry points, for two different flows:**
   - `app/api/auth/callback/route.ts` — PKCE / OAuth. Reads `?code=` and calls `exchangeCodeForSession`.
   - `app/api/auth/confirm/route.ts` — email links (invite, signup, magic link, recovery, email change). Reads `?token_hash=` + `?type=` and calls `verifyOtp`.
@@ -176,6 +176,7 @@ const { data: perms } = await supabase.rpc('get_user_permissions', {
 2. Supabase sends invite email via `adminClient.auth.admin.inviteUserByEmail()`
 3. User's role is assigned immediately in `user_roles`
 4. Accounts created directly in the shared project remain without a role until an admin assigns one; production removed `on_auth_user_created` in migration 018
+5. While `SIGNUP_ENABLED` is on, users can also self-register at `/signup`. They confirm via the email link (→ `/api/auth/confirm`), land on the dashboard with no permissions, and wait for an admin to assign a role
 
 ### User Deletion
 
@@ -254,6 +255,7 @@ Still not captured: `ip_address` and `user_agent` exist on `audit_logs` and are 
 | Route | Access | Description |
 |-------|--------|-------------|
 | `/login` | Public | Email/password login |
+| `/signup` | Public while `SIGNUP_ENABLED` | Self-signup; account has no role until an admin assigns one |
 | `/` | Authenticated | Dashboard — user info, permission summary, quick actions |
 | `/users` | `manage_users` | User list with search, invite modal, remove button |
 | `/users/[id]` | `manage_users` | User detail: role selector, permission matrix, remove |
