@@ -22,6 +22,8 @@ No test framework is configured.
 
 ## Environment Variables
 
+`NPM_TOKEN` — GitHub token with `read:packages`, needed by `.npmrc` to install `@rhino-automotive-glass/auth-ui` from GitHub Packages. Required locally for `npm install` (e.g. `NPM_TOKEN=$(gh auth token) npm install`) and as a Vercel environment variable for builds.
+
 Copy `.env.local.example` to `.env.local`. Required values from Supabase dashboard:
 - `NEXT_PUBLIC_SUPABASE_URL` — Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase publishable anon key
@@ -43,7 +45,9 @@ Three Supabase client variants used depending on context:
 - `admin.ts` — Admin client (uses service role key, bypasses RLS; server-only for `auth.admin.*` calls)
 
 ### Authentication (`app/lib/auth/`)
-- `actions.ts` — Server actions (`'use server'`) for `signIn` and `signOut`
+- `actions.ts` — Server action (`'use server'`) for `signOut`
+- **Auth UI comes from `@rhino-automotive-glass/auth-ui`**, the shared package used by the sibling Rhino apps (source: `../rhino-auth-ui`). `app/(auth)/layout.tsx` wraps `/login`, `/forgot-password`, and `/reset-password` in its `AuthLayout`; the pages render `LoginForm`, `ForgotPasswordForm`, and `UpdatePasswordForm` with the browser Supabase client. `app/globals.css` must keep `@import "@rhino-automotive-glass/auth-ui/styles.css";` or Tailwind will not scan the package and its classes are dropped. No `SignupForm` — access is invite-only.
+- `ForgotPasswordForm` is passed `redirectTo` = `<origin>/api/auth/confirm` explicitly. The package default (`/auth/callback`) does not exist in this app.
 - `constants.ts` — Route paths and error message constants
 - `siteUrl.ts` — `getSiteUrl()`, the single source for the base URL used in auth email links
 - **Access is invite-only.** There is no `/signup` route or `signUp` action. Accounts are created by an admin via `POST /api/admin/users/invite`. Production removed `on_auth_user_created` in migration 018, so direct accounts have no role until one is assigned.

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@rhino-automotive-glass/auth-ui/styles.css";
 
 /* CSS Custom Properties */
 @theme {
